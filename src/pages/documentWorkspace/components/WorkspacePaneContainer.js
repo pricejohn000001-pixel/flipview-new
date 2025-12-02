@@ -5,7 +5,11 @@ import { useWorkspaceApi, useClippingsApi } from '../context/DocumentWorkspaceCo
 
 const WorkspacePaneContainer = () => {
   const workspace = useWorkspaceApi();
-  const { items: clippings } = useClippingsApi();
+  const {
+    items: clippings,
+    selectedIds,
+    toggleSelection,
+  } = useClippingsApi();
 
   return (
     <WorkspacePane
@@ -14,6 +18,8 @@ const WorkspacePaneContainer = () => {
       workspaceComments={workspace.comments}
       workspaceRef={workspace.ref}
       clippings={clippings}
+      selectedClipIds={selectedIds}
+      onToggleClipSelection={toggleSelection}
       draggingWorkspaceItemIdRef={workspace.draggingItemIdRef}
       startMoveWorkspaceItem={workspace.startMoveItem}
       handleWorkspacePointerMove={workspace.moveItem}

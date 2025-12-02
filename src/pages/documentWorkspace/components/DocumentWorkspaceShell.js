@@ -1,20 +1,29 @@
 import styles from '../documentWorkspace.module.css';
 import OcrOverlay from './OcrOverlay';
 import SelectionMenu from './SelectionMenu';
-import ClippingsPanelContainer from './ClippingsPanelContainer';
 import MainViewerArea from './MainViewerArea';
 import RightPanelContainer from './RightPanelContainer';
+import AppBarContainer from './AppBarContainer';
+import SearchBarContainer from './SearchBarContainer';
+import { useToolbarApi } from '../context/DocumentWorkspaceContext';
+import MultiClipCombineFab from './MultiClipCombineFab';
 import React from 'react';
 
-const DocumentWorkspaceShell = () => (
-  <div className={styles.workspace}>
-    <OcrOverlay />
-    <SelectionMenu />
-    <ClippingsPanelContainer />
-    <MainViewerArea />
-    <RightPanelContainer />
-  </div>
-);
+const DocumentWorkspaceShell = () => {
+  const { isTablet, isSearchBarOpen, toggleSearchBar, closeSearchBar } = useToolbarApi();
+  
+  return (
+    <div className={`${styles.workspace} ${isTablet ? styles.workspaceTablet : ''}`}>
+      <AppBarContainer isSearchOpen={isSearchBarOpen} onSearchToggle={toggleSearchBar} />
+      <SearchBarContainer isVisible={isSearchBarOpen} onClose={closeSearchBar} />
+      <OcrOverlay />
+      <SelectionMenu />
+      <MainViewerArea />
+      <RightPanelContainer />
+      <MultiClipCombineFab />
+    </div>
+  );
+};
 
 export default DocumentWorkspaceShell;
 

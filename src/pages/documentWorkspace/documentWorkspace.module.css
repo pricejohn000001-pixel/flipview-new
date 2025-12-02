@@ -4,6 +4,7 @@
 
 .workspace {
   display: flex;
+  flex-direction: row;
   height: 100vh;
   max-height: 100vh;
   overflow: hidden;
@@ -14,6 +15,182 @@
   -webkit-user-select: none;
   -moz-user-select: none;
   -ms-user-select: none;
+  position: relative;
+  margin-top: 40px;
+}
+
+/* ============================================================
+   APP BAR (Top Bar with Zoom and Search)
+   ============================================================ */
+
+.appBar {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 40px;
+  background: rgba(255, 255, 255, 0.95);
+  backdrop-filter: blur(16px);
+  border-bottom: 1px solid rgba(0, 0, 0, 0.08);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
+  z-index: 100;
+  display: flex;
+  align-items: center;
+  padding: 0 12px;
+}
+
+.appBarContent {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.appBarLeft {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.appBarRight {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.appBarButton {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  border: 1px solid rgba(99, 102, 241, 0.3);
+  background: rgba(255, 255, 255, 0.9);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: #4c1d95;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  box-shadow: 0 2px 6px rgba(99, 102, 241, 0.15);
+}
+
+.appBarButton:hover {
+  transform: translateY(-1px);
+  background: linear-gradient(135deg, #ede9fe, #f5f3ff);
+  box-shadow: 0 4px 12px rgba(99, 102, 241, 0.25);
+}
+
+.appBarButtonActive {
+  background: linear-gradient(135deg, #6366f1, #8b5cf6);
+  color: white;
+  border-color: transparent;
+  box-shadow: 0 4px 12px rgba(99, 102, 241, 0.35);
+}
+
+.zoomControls {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px;
+  background: rgba(0, 0, 0, 0.02);
+  border-radius: 16px;
+}
+
+.zoomControls .zoomValue {
+  font-size: 12px;
+  min-width: 40px;
+}
+
+/* ============================================================
+   SEARCH BAR (Floating Search Bar)
+   ============================================================ */
+
+.searchBar {
+  position: fixed;
+  top: 40px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 90%;
+  max-width: 600px;
+  background: rgba(255, 255, 255, 0.98);
+  backdrop-filter: blur(16px);
+  border-radius: 0 0 16px 16px;
+  border: 1px solid rgba(99, 102, 241, 0.2);
+  border-top: none;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12);
+  z-index: 99;
+  padding: 12px 16px;
+  animation: slideDown 0.2s ease-out;
+}
+
+@keyframes slideDown {
+  from {
+    opacity: 0;
+    transform: translateX(-50%) translateY(-10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(-50%) translateY(0);
+  }
+}
+
+.searchBarContent {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.searchBarInput {
+  flex: 1;
+  border: 1px solid rgba(99, 102, 241, 0.3);
+  border-radius: 20px;
+  padding: 10px 16px;
+  font-size: 14px;
+  min-width: 200px;
+  background: #ffffff;
+}
+
+.searchBarInput:focus {
+  outline: none;
+  border-color: #6366f1;
+  box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.15);
+}
+
+.searchBarStatus {
+  font-size: 13px;
+  font-weight: 600;
+  color: #4338ca;
+  min-width: 60px;
+  text-align: center;
+}
+
+.searchBarNav {
+  display: flex;
+  gap: 6px;
+}
+
+.searchBarButton {
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  border: 1px solid rgba(99, 102, 241, 0.3);
+  background: rgba(255, 255, 255, 0.9);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: #4c1d95;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.searchBarButton:hover:not(:disabled) {
+  transform: translateY(-1px);
+  background: linear-gradient(135deg, #ede9fe, #f5f3ff);
+  box-shadow: 0 2px 6px rgba(99, 102, 241, 0.2);
+}
+
+.searchBarButton:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
 }
 
 .selectionCommentMenu {
@@ -27,6 +204,7 @@
   pointer-events: all;
   display: flex;
   align-items: center;
+  gap: 12px;
 }
 
 .selectionCommentMenu button {
@@ -52,6 +230,8 @@
 .rightPanel {
   width: 300px;
   min-width: 260px;
+  height: calc(100vh - 40px);
+  max-height: calc(100vh - 40px);
   display: flex;
   flex-direction: column;
   background: #ffffff;
@@ -63,6 +243,23 @@
   -ms-user-select: none;
   min-height: 0;
   overflow: hidden;
+  transition: width 0.3s ease, min-width 0.3s ease;
+  position: relative;
+  align-self: flex-start;
+}
+
+.leftPanelCollapsed {
+  width: 64px;
+  min-width: 64px;
+}
+
+.leftPanelCollapsed .panelToggle {
+  flex-direction: column;
+  gap: 4px;
+  font-size: 10px;
+  writing-mode: vertical-rl;
+  text-orientation: mixed;
+  padding: 30px 8px;
 }
 
 .rightPanel {
@@ -104,12 +301,14 @@
   background: transparent;
   overflow: hidden;
   position: relative;
-  padding-top: 110px;
   min-height: 0;
+  height: calc(100vh - 40px);
+  max-height: calc(100vh - 40px);
   user-select: none;
   -webkit-user-select: none;
   -moz-user-select: none;
   -ms-user-select: none;
+  align-self: flex-start;
 }
 
 .floatingToolbarContainer {
@@ -121,6 +320,25 @@
   justify-content: center;
   pointer-events: none;
   z-index: 20;
+}
+
+.floatingToolbarContainerBottom {
+  position: fixed;
+  bottom: 16px;
+  left: 0;
+  width: 100%;
+  display: flex;
+  justify-content: center;
+  pointer-events: none;
+  z-index: 20;
+}
+
+/* Additional tablet styles using class */
+.workspaceTablet {
+  /* Ensure landscape layout for tablets */
+  min-height: 100vh;
+  max-height: 100vh;
+  overflow: hidden;
 }
 
 .floatingToolbarStack {
@@ -580,15 +798,19 @@
   flex: 1;
   overflow: auto;
   padding: 24px;
-  padding-bottom: 48px; /* Extra bottom padding to ensure last page is fully visible */
+  padding-bottom: 100px; /* Extra bottom padding to ensure last page is fully visible with bottom toolbar */
   display: flex;
   align-items: flex-start;
   justify-content: center;
   position: relative;
-  height: calc(100vh - 110px); /* Fixed responsive height accounting for toolbar padding */
   min-height: 0;
-  max-height: calc(100vh - 110px);
   box-sizing: border-box;
+}
+
+/* When PDF content is zoomed/panned so that it extends beyond the viewport,
+   we left-align the content to avoid awkward horizontal centering while scrolling */
+.viewerZoomWrapperLeftAligned {
+  justify-content: flex-start;
 }
 
 .singlePane {
@@ -986,6 +1208,65 @@
   cursor: crosshair;
 }
 
+.workspaceCombineFab {
+  position: absolute;
+  right: 24px;
+  bottom: 24px;
+  pointer-events: none;
+  z-index: 120;
+}
+
+.workspaceCombineButton {
+  pointer-events: auto;
+  border: none;
+  border-radius: 999px;
+  padding: 12px 24px;
+  font-weight: 600;
+  font-size: 13px;
+  letter-spacing: 0.4px;
+  background: linear-gradient(135deg, #22d3ee, #3b82f6);
+  color: #ffffff;
+  box-shadow: 0 15px 35px rgba(59, 130, 246, 0.35);
+  cursor: pointer;
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+
+.workspaceCombineButton:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 24px 45px rgba(59, 130, 246, 0.4);
+}
+
+.workspaceCombineButton:active {
+  transform: translateY(0);
+  box-shadow: 0 10px 20px rgba(59, 130, 246, 0.25);
+}
+
+.workspaceCombineHover {
+  position: fixed;
+  z-index: 1700;
+  transform: translateY(-50%);
+  background: rgba(15, 23, 42, 0.96);
+  padding: 6px 14px;
+  border-radius: 999px;
+  box-shadow: 0 12px 30px rgba(15, 23, 42, 0.25);
+  pointer-events: all;
+}
+
+.workspaceCombineHover button {
+  border: none;
+  background: transparent;
+  color: #fef3c7;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.workspaceCombineHover button:hover {
+  color: #fde047;
+}
+
 .workspaceDrawingSvg {
   width: 100%;
   height: 100%;
@@ -1026,6 +1307,36 @@
   pointer-events: all;
   transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
   border: 1px solid rgba(0, 0, 0, 0.06);
+}
+
+.workspaceItemSelected {
+  border-color: rgba(99, 102, 241, 0.9);
+  box-shadow:
+    0 0 0 2px rgba(129, 140, 248, 0.8),
+    inset 0 0 0 1px rgba(255, 255, 255, 0.5),
+    0 14px 28px rgba(99, 102, 241, 0.2);
+  animation: clipEdgeGlow 1.6s ease-in-out infinite;
+}
+
+@keyframes clipEdgeGlow {
+  0% {
+    box-shadow:
+      0 0 0 2px rgba(129, 140, 248, 0.8),
+      inset 0 0 0 1px rgba(255, 255, 255, 0.5),
+      0 14px 28px rgba(99, 102, 241, 0.2);
+  }
+  50% {
+    box-shadow:
+      0 0 0 3px rgba(129, 140, 248, 1),
+      inset 0 0 0 1.5px rgba(255, 255, 255, 0.7),
+      0 18px 32px rgba(99, 102, 241, 0.3);
+  }
+  100% {
+    box-shadow:
+      0 0 0 2px rgba(129, 140, 248, 0.8),
+      inset 0 0 0 1px rgba(255, 255, 255, 0.5),
+      0 14px 28px rgba(99, 102, 241, 0.2);
+  }
 }
 
 .workspaceItem:hover {

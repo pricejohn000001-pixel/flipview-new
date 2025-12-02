@@ -1,4 +1,5 @@
 import React from 'react';
+import { MdChevronLeft, MdChevronRight } from 'react-icons/md';
 import styles from '../documentWorkspace.module.css';
 
 const ClippingsPanel = ({
@@ -13,8 +14,17 @@ const ClippingsPanel = ({
   onJumpToPage,
   getPrimaryPageFromSource,
   onUncombineClipping,
+  isCollapsed,
+  onToggleCollapse,
 }) => (
-  <aside className={styles.leftPanel}>
+  <aside className={`${styles.leftPanel} ${isCollapsed ? styles.leftPanelCollapsed : ''}`}>
+    <button type="button" className={styles.panelToggle} onClick={onToggleCollapse}>
+      {isCollapsed ? <MdChevronRight size={18} /> : <MdChevronLeft size={18} />}
+      <span>{isCollapsed ? 'Open clippings' : 'Collapse clippings'}</span>
+    </button>
+
+    {!isCollapsed && (
+      <>
     <div className={styles.panelHeader}>Clippings &amp; Excerpts</div>
     <div className={styles.panelContent}>
       <div className={styles.toolbarGroup}>
@@ -36,6 +46,7 @@ const ClippingsPanel = ({
             className={`${styles.clippingCard} ${selectedClippings.includes(clip.id) ? styles.clippingCardSelected : ''}`}
             draggable
             onDragStart={(e) => onClippingDragStart(e, clip.id)}
+            data-clipping-card={clip.id}
           >
             <input type="checkbox" checked={selectedClippings.includes(clip.id)} onChange={() => onToggleClippingSelection(clip.id)} />
             <small>
@@ -70,6 +81,8 @@ const ClippingsPanel = ({
         ))
       )}
     </div>
+      </>
+    )}
   </aside>
 );
 

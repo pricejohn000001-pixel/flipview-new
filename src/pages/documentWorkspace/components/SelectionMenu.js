@@ -3,7 +3,7 @@ import styles from '../documentWorkspace.module.css';
 import { useSelectionApi } from '../context/DocumentWorkspaceContext';
 
 const SelectionMenu = () => {
-  const { menu, createCommentFromSelection } = useSelectionApi();
+  const { menu, createCommentFromSelection, createClipFromSelection } = useSelectionApi();
 
   if (!menu) return null;
 
@@ -19,6 +19,14 @@ const SelectionMenu = () => {
         title="Add comment"
       >
         Comment
+      </button>
+      <button
+        type="button"
+        onMouseDown={(event) => event.preventDefault()}
+        onClick={createClipFromSelection}
+        title="Create clipping"
+      >
+        Clip
       </button>
     </div>
   );

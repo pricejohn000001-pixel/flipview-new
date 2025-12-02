@@ -6,14 +6,13 @@ import {
   BRUSH_SIZES,
   FREEHAND_COLORS,
 } from '../constants';
-import { useToolbarApi, useSearchApi } from '../context/DocumentWorkspaceContext';
+import { useToolbarApi } from '../context/DocumentWorkspaceContext';
+import styles from '../documentWorkspace.module.css';
 
 const FloatingToolbarContainer = () => {
   const {
     activeTool,
     selectTool,
-    manualZoom,
-    primaryScale,
     color,
     setColor,
     brushSize,
@@ -28,20 +27,11 @@ const FloatingToolbarContainer = () => {
     dismissPalette,
     isFreehandCommentMode,
     setIsFreehandCommentMode,
-    searchTerm,
-    setSearchTerm,
     isHighlightView,
     setIsHighlightView,
     setHighlightViewCropZoom,
+    isTablet,
   } = useToolbarApi();
-
-  const {
-    isSearching,
-    results,
-    activeIndex,
-    goToNextResult,
-    goToPreviousResult,
-  } = useSearchApi();
 
   const handleToggleHighlightView = () => {
     setIsHighlightView((prev) => {
@@ -53,45 +43,36 @@ const FloatingToolbarContainer = () => {
     });
   };
 
-  const totalResults = results?.length || 0;
-  const activeResultNumber = totalResults && activeIndex >= 0 ? activeIndex + 1 : 0;
+  const toolbarProps = {
+    toolTypes: TOOL_TYPES,
+    activeTool,
+    onToolClick: selectTool,
+    colorOptions: COLOR_OPTIONS,
+    activeColor: color,
+    onColorSelect: setColor,
+    brushSizeOptions: BRUSH_SIZES,
+    activeBrushSize: brushSize,
+    onBrushSizeSelect: setBrushSize,
+    activeBrushOpacity: brushOpacity,
+    onBrushOpacityChange: setBrushOpacity,
+    freehandColorOptions: FREEHAND_COLORS,
+    freehandMode,
+    onFreehandModeChange: setFreehandMode,
+    isPressureEnabled,
+    onTogglePressure: setIsPressureEnabled,
+    isFreehandPaletteVisible: isPaletteOpen,
+    onFreehandPaletteDismiss: dismissPalette,
+    isFreehandCommentMode,
+    onToggleFreehandCommentMode: () =>
+      setIsFreehandCommentMode((prev) => !prev),
+    isHighlightView,
+    onToggleHighlightView: handleToggleHighlightView,
+  };
 
   return (
-    <FloatingToolbar
-      toolTypes={TOOL_TYPES}
-      activeTool={activeTool}
-      onToolClick={selectTool}
-      onManualZoom={manualZoom}
-      primaryScale={primaryScale}
-      colorOptions={COLOR_OPTIONS}
-      activeColor={color}
-      onColorSelect={setColor}
-      brushSizeOptions={BRUSH_SIZES}
-      activeBrushSize={brushSize}
-      onBrushSizeSelect={setBrushSize}
-      activeBrushOpacity={brushOpacity}
-      onBrushOpacityChange={setBrushOpacity}
-      freehandColorOptions={FREEHAND_COLORS}
-      freehandMode={freehandMode}
-      onFreehandModeChange={setFreehandMode}
-      isPressureEnabled={isPressureEnabled}
-      onTogglePressure={setIsPressureEnabled}
-      isFreehandPaletteVisible={isPaletteOpen}
-      onFreehandPaletteDismiss={dismissPalette}
-      isFreehandCommentMode={isFreehandCommentMode}
-      onToggleFreehandCommentMode={() =>
-        setIsFreehandCommentMode((prev) => !prev)
-      }
-      searchTerm={searchTerm}
-      onSearchTermChange={setSearchTerm}
-      isSearching={isSearching}
-      totalResults={totalResults}
-      activeResultNumber={activeResultNumber}
-      onNextResult={goToNextResult}
-      onPreviousResult={goToPreviousResult}
-      isHighlightView={isHighlightView}
-      onToggleHighlightView={handleToggleHighlightView}
-    />
+    <div className={styles.floatingToolbarContainerBottom}>
+      <FloatingToolbar {...toolbarProps} />
+    </div>
   );
 };
 

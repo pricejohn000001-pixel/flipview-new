@@ -15,6 +15,8 @@ const ClippingsPanelContainer = () => {
     uncombine,
     jumpToPage,
     resolvePrimaryPage,
+    isCollapsed,
+    toggleCollapse,
   } = useClippingsApi();
 
   return (
@@ -30,6 +32,8 @@ const ClippingsPanelContainer = () => {
       onJumpToPage={jumpToPage}
       getPrimaryPageFromSource={resolvePrimaryPage}
       onUncombineClipping={uncombine}
+      isCollapsed={isCollapsed}
+      onToggleCollapse={toggleCollapse}
     />
   );
 };

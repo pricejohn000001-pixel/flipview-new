@@ -38,6 +38,7 @@ const DocumentPane = () => {
     documentRightPadding,
     isHighlightView,
     highlightBoundsPerPage,
+    isPdfOutOfViewport,
   } = useDocumentApi();
 
   const annotationsToRender = useMemo(
@@ -50,7 +51,12 @@ const DocumentPane = () => {
       className={styles.documentPane}
       style={{ paddingRight: `${Math.max(documentRightPadding, WORKSPACE_RESIZER_WIDTH)}px` }}
     >
-      <div ref={viewerZoomWrapperRef} className={styles.viewerZoomWrapper}>
+      <div
+        ref={viewerZoomWrapperRef}
+        className={`${styles.viewerZoomWrapper} ${
+          isPdfOutOfViewport ? styles.viewerZoomWrapperLeftAligned : ''
+        }`}
+      >
         <Document file={demoPdf} onLoadSuccess={onDocumentLoadSuccess}>
           <section
             className={styles.multiPageContainer}

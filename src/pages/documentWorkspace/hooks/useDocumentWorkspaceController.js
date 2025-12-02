@@ -94,6 +94,28 @@ const doesLineHitPoint = (line, point, overlayDimensions) => {
   return distanceSqPointToSegment(point, { x: line.x1, y: line.y1 }, { x: line.x2, y: line.y2 }) <= threshold * threshold;
 };
 
+const normalizeClippingText = (value) => {
+  if (!value) return '';
+  const lines = value.replace(/\r/g, '').split('\n');
+  const paragraphs = [];
+  let current = [];
+  lines.forEach((line) => {
+    const trimmed = line.trim();
+    if (!trimmed) {
+      if (current.length) {
+        paragraphs.push(current.join(' '));
+        current = [];
+      }
+    } else {
+      current.push(trimmed);
+    }
+  });
+  if (current.length) {
+    paragraphs.push(current.join(' '));
+  }
+  return paragraphs.join('\n\n').trim();
+};
+
 const doesAnnotationHitPoint = (annotation, point, overlayDimensions) => {
   if (!annotation || !ERASER_TARGET_TYPES.has(annotation.type)) return false;
   if (annotation.type === 'highlight') {
@@ -121,7 +143,6 @@ export const useDocumentWorkspaceController = () => {
   const [numPages, setNumPages] = useState(null);
   const [isPdfReady, setIsPdfReady] = useState(false);
   const [primaryPage, setPrimaryPage] = useState(1);
-  const [primaryScale, setPrimaryScale] = useState(1.15);
 
   // base annotation/bookmark state (your existing features)
   const [annotations, setAnnotations] = useState([]);
@@ -135,11 +156,12 @@ export const useDocumentWorkspaceController = () => {
   const [isPressureEnabled, setIsPressureEnabled] = useState(true);
   const [isFreehandPaletteOpen, setIsFreehandPaletteOpen] = useState(false);
   const [isFreehandCommentMode, setIsFreehandCommentMode] = useState(false);
-  const [workspaceSlide, setWorkspaceSlide] = useState(WORKSPACE_SLIDE_MIN);
+  const [isSearchBarOpen, setIsSearchBarOpen] = useState(false);
   const [isWorkspaceResizing, setIsWorkspaceResizing] = useState(false);
   const [selectionMenu, setSelectionMenu] = useState(null);
   const [isHighlightView, setIsHighlightView] = useState(false);
   const [highlightViewCropZoom, setHighlightViewCropZoom] = useState(1.0); // Separate zoom for cropping, not page scale
+  const [isPdfOutOfViewport, setIsPdfOutOfViewport] = useState(false);
 
   // drawing / clippings / search
   const [drawingState, setDrawingState] = useState(null);
@@ -154,7 +176,27 @@ export const useDocumentWorkspaceController = () => {
   // each: { id, type: 'clip' | 'comment', sourceId, x, y }
   const [workspaceItems, setWorkspaceItems] = useState([]);
   const [workspaceComments, setWorkspaceComments] = useState([]);
-  const [isRightPanelCollapsed, setIsRightPanelCollapsed] = useState(false);
+  // Initialize tablet detection on first render
+  const checkTabletInitial = () => {
+    if (typeof window === 'undefined') return false;
+    const width = window.innerWidth;
+    const height = window.innerHeight;
+    const isTouchDevice = 'ontouchstart' in window || navigator.maxTouchPoints > 0;
+    return isTouchDevice && width >= 768 && width <= 1400 && (width > height);
+  };
+  const isTabletInitial = checkTabletInitial();
+  const initialPrimaryScale = isTabletInitial ? 0.8 : 1.0;
+  const [primaryScale, setPrimaryScale] = useState(initialPrimaryScale);
+  const [isTablet, setIsTablet] = useState(isTabletInitial);
+  const [isRightPanelCollapsed, setIsRightPanelCollapsed] = useState(isTabletInitial);
+  const [isClippingsPanelCollapsed, setIsClippingsPanelCollapsed] = useState(isTabletInitial);
+  // Initialize workspace slide:
+  // - Tablets: 50% for a more compact canvas (500px of 1000px visible)
+  // - Desktop: start with ~30% of the workspace visible (300px of 1000px)
+  const initialWorkspaceSlide = isTabletInitial
+    ? WORKSPACE_FIXED_WIDTH_PX / 2
+    : WORKSPACE_FIXED_WIDTH_PX * 0.7;
+  const [workspaceSlide, setWorkspaceSlide] = useState(initialWorkspaceSlide);
 
   // refs
   const pdfProxyRef = useRef(null);
@@ -162,7 +204,7 @@ export const useDocumentWorkspaceController = () => {
   const searchRunIdRef = useRef(0);
   const viewerZoomWrapperRef = useRef(null);
   const viewerDeckRef = useRef(null);
-  const workspaceResizeMetaRef = useRef({ startX: 0, startSlide: WORKSPACE_SLIDE_MIN });
+  const workspaceResizeMetaRef = useRef({ startX: 0, startSlide: initialWorkspaceSlide });
   
   // Page position tracking for annotation rail
   const [pagePositions, setPagePositions] = useState({}); // { pageNumber: { top, height } }
@@ -177,6 +219,33 @@ export const useDocumentWorkspaceController = () => {
     runOcrOnAllPages,
     extractTextFromArea,
   } = useOcr({ pdfProxyRef });
+
+  // Tablet detection - typically 768px-1024px width and touch capability
+  useEffect(() => {
+    const checkTablet = () => {
+      const width = window.innerWidth;
+      const height = window.innerHeight;
+      const isTouchDevice = 'ontouchstart' in window || navigator.maxTouchPoints > 0;
+      // Tablet: width between 768-1400px (or wider in landscape), touch capable, and landscape orientation
+      const isTabletDevice = isTouchDevice && width >= 768 && width <= 1400 && (width > height);
+      setIsTablet(isTabletDevice);
+      
+      // Keep panels collapsed for tablets when in landscape
+      if (isTabletDevice) {
+        setIsRightPanelCollapsed(true);
+        setIsClippingsPanelCollapsed(true);
+      }
+    };
+    
+    // Check immediately and on resize/orientation change
+    checkTablet();
+    window.addEventListener('resize', checkTablet);
+    window.addEventListener('orientationchange', checkTablet);
+    return () => {
+      window.removeEventListener('resize', checkTablet);
+      window.removeEventListener('orientationchange', checkTablet);
+    };
+  }, []);
 
   const handleExtractClipFromArea = useCallback((clipRect, pageNumber) => {
     extractTextFromArea(clipRect, pageNumber).then((result) => {
@@ -193,8 +262,10 @@ export const useDocumentWorkspaceController = () => {
       setClippings((prev) => [newClip, ...prev]);
       setSelectedClippings([]);
       setActiveTool('select');
+      const normalizedY = numPages ? clamp(pageNumber / numPages, 0.08, 0.9) : undefined;
+      addClipToWorkspace(newClip.id, { preferredY: normalizedY });
     });
-  }, [extractTextFromArea]);
+  }, [extractTextFromArea, numPages, addClipToWorkspace]);
 
   const draggingAnnotationId = useRef(null);
   const draggingAnnotationMetaRef = useRef({ offsetX: 0, offsetY: 0, pageNumber: 1 });
@@ -299,8 +370,9 @@ export const useDocumentWorkspaceController = () => {
       }
       const range = sel.getRangeAt(0);
       const detectedPage = detectSelectionPage(range);
+      const normalizedText = normalizeClippingText(sel.toString());
       currentSelectionRef.current = {
-        text: sel.toString().trim(),
+        text: normalizedText,
         range: range.cloneRange(),
         pageNumber: detectedPage,
       };
@@ -312,7 +384,7 @@ export const useDocumentWorkspaceController = () => {
       setSelectionMenu({
         x: rect.left + rect.width / 2,
         y: Math.max(rect.top - 40, 12),
-        quote: sel.toString().trim(),
+        quote: normalizedText,
       });
     };
     document.addEventListener('selectionchange', captureSelection);
@@ -1281,7 +1353,8 @@ useEffect(() => {
   // ---------- clipboard/clipping logic (captures source rect) ----------
   const handleClipSelection = useCallback(() => {
     const sel = window.getSelection();
-    const text = sel?.toString().trim();
+    const raw = sel?.toString() ?? '';
+    const text = normalizeClippingText(raw);
     
     // If no text selected, show alert
     if (!text) {
@@ -1326,7 +1399,10 @@ useEffect(() => {
     setSelectedClippings([]);
     sel.removeAllRanges();
     currentSelectionRef.current = { text: '', range: null, pageNumber: null };
-  }, [ocrResults]);
+    setSelectionMenu(null);
+    const normalizedY = numPages ? clamp(pageNum / numPages, 0.08, 0.9) : undefined;
+    addClipToWorkspace(newClip.id, { preferredY: normalizedY });
+  }, [ocrResults, numPages, addClipToWorkspace]);
 
   const toggleClippingSelection = useCallback((id) => {
     setSelectedClippings((prev) => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]);
@@ -1867,6 +1943,31 @@ useEffect(() => {
 
   // Allow drops on workspace container
   const workspaceRef = useRef(null);
+
+  const addClipToWorkspace = useCallback((clipId, { preferredY } = {}) => {
+    if (!clipId) return;
+    const createdAt = new Date().toISOString();
+    setWorkspaceItems((prev) => {
+      const clipCount = prev.filter((it) => getWorkspaceItemType(it) === 'clip').length;
+      const leftOffset = clamp(
+        WORKSPACE_LEFT_STACK_X + (clipCount % 4) * (WORKSPACE_LEFT_STACK_SPREAD / 2) + Math.random() * 0.01,
+        0.02,
+        0.22,
+      );
+      const yPosition = typeof preferredY === 'number'
+        ? clamp(preferredY, 0.05, 0.95)
+        : clamp(0.2 + ((clipCount * 0.18) % 0.6), 0.08, 0.92);
+      const newItem = {
+        id: createWorkspaceItemId(),
+        type: 'clip',
+        sourceId: clipId,
+        x: leftOffset,
+        y: yPosition,
+        createdAt,
+      };
+      return [newItem, ...prev];
+    });
+  }, []);
   const pulseTemporaryHighlight = useCallback(
     ({ pageNumber, position, color = '#ffe58a', duration = 1000 }) => {
       if (!pageNumber || !position) return;
@@ -1903,24 +2004,7 @@ useEffect(() => {
       const rect = root.getBoundingClientRect();
       if (!rect) return;
       const pointerY = clamp((ev.clientY - rect.top) / rect.height, 0.02, 0.98);
-      const createdAt = new Date().toISOString();
-      setWorkspaceItems(prev => {
-        const clipCount = prev.filter((it) => getWorkspaceItemType(it) === 'clip').length;
-        const leftOffset = clamp(
-          WORKSPACE_LEFT_STACK_X + (clipCount % 4) * (WORKSPACE_LEFT_STACK_SPREAD / 2) + Math.random() * 0.01,
-          0.02,
-          0.22,
-        );
-        const newItem = {
-          id: createWorkspaceItemId(),
-          type: 'clip',
-          sourceId: clipId,
-          x: leftOffset,
-          y: pointerY,
-          createdAt,
-        };
-        return [newItem, ...prev];
-      });
+      addClipToWorkspace(clipId, { preferredY: pointerY });
       const firstSegmentPage = clip.segments?.[0]?.sourcePage;
       const targetPage = getPrimaryPageFromSource(firstSegmentPage || clip.sourcePage || primaryPage);
       setPrimaryPage(targetPage);
@@ -1931,7 +2015,7 @@ useEffect(() => {
       root.removeEventListener('dragover', handleDragOver);
       root.removeEventListener('drop', handleDrop);
     };
-}, [clippings, primaryPage]);
+}, [clippings, primaryPage, addClipToWorkspace]);
 
   // remove workspace items whose clips no longer exist
   useEffect(() => {
@@ -2145,7 +2229,36 @@ useEffect(() => {
     }
   }, [clippings, workspaceComments, pulseTemporaryHighlight]);
 
-  // ---------- PAGE POSITION TRACKING ----------
+  // ---------- PAGE POSITION TRACKING & VIEWPORT STATE ----------
+
+  // Detect when the PDF content starts moving out of the horizontal viewport so we can
+  // switch away from justify-content: center (which causes awkward scrolling when zoomed in).
+  const updatePdfViewportState = useCallback(() => {
+    const wrapper = viewerZoomWrapperRef.current;
+    if (!wrapper) return;
+
+    const { scrollWidth, clientWidth, scrollLeft } = wrapper;
+
+    // If content is wider than the viewport and we are scrolled away from the centered position,
+    // consider the PDF "out of viewport" horizontally.
+    const hasHorizontalOverflow = scrollWidth > clientWidth + 1;
+    if (!hasHorizontalOverflow) {
+      if (isPdfOutOfViewport) {
+        setIsPdfOutOfViewport(false);
+      }
+      return;
+    }
+
+    const epsilon = 2;
+    const atExtremeLeft = scrollLeft <= epsilon;
+    const atExtremeRight = scrollLeft + clientWidth >= scrollWidth - epsilon;
+
+    // Out of viewport if we are panned somewhere between the extremes (i.e., user is actively panning)
+    const outOfViewport = !(atExtremeLeft || atExtremeRight);
+    if (outOfViewport !== isPdfOutOfViewport) {
+      setIsPdfOutOfViewport(outOfViewport);
+    }
+  }, [isPdfOutOfViewport]);
   const measurePagePositions = useCallback(() => {
     const positions = {};
     const scrollContainer = viewerZoomWrapperRef.current;
@@ -2170,22 +2283,31 @@ useEffect(() => {
   useEffect(() => {
     if (!isPdfReady || !numPages) return;
     // Initial measure after pages render
-    const timeout = setTimeout(measurePagePositions, 100);
+    const timeout = setTimeout(() => {
+      measurePagePositions();
+      updatePdfViewportState();
+    }, 100);
     return () => clearTimeout(timeout);
-  }, [isPdfReady, numPages, primaryScale, measurePagePositions]);
+  }, [isPdfReady, numPages, primaryScale, measurePagePositions, updatePdfViewportState]);
 
   useEffect(() => {
     const wrapper = viewerZoomWrapperRef.current;
     if (!wrapper) return;
-    const handleScroll = () => measurePagePositions();
-    const handleResize = () => measurePagePositions();
+    const handleScroll = () => {
+      measurePagePositions();
+      updatePdfViewportState();
+    };
+    const handleResize = () => {
+      measurePagePositions();
+      updatePdfViewportState();
+    };
     wrapper.addEventListener('scroll', handleScroll, { passive: true });
     window.addEventListener('resize', handleResize);
     return () => {
       wrapper.removeEventListener('scroll', handleScroll);
       window.removeEventListener('resize', handleResize);
     };
-  }, [measurePagePositions]);
+  }, [measurePagePositions, updatePdfViewportState]);
 
   // ---------- ZOOM & PAN ----------
   // Zoom now affects individual pages, not a single canvas
@@ -2259,6 +2381,10 @@ useEffect(() => {
 
   const handleToggleRightPanel = useCallback(() => {
     setIsRightPanelCollapsed(prev => !prev);
+  }, []);
+
+  const handleToggleClippingsPanel = useCallback(() => {
+    setIsClippingsPanelCollapsed(prev => !prev);
   }, []);
 
   const handleWorkspaceResizeStart = useCallback((event) => {
@@ -2398,7 +2524,16 @@ useEffect(() => {
   const selectionApi = useMemo(() => ({
     menu: selectionMenu,
     createCommentFromSelection: handleCreateCommentFromSelection,
-  }), [selectionMenu, handleCreateCommentFromSelection]);
+    createClipFromSelection: handleClipSelection,
+  }), [selectionMenu, handleCreateCommentFromSelection, handleClipSelection]);
+
+  const handleToggleSearchBar = useCallback(() => {
+    setIsSearchBarOpen(prev => !prev);
+  }, []);
+
+  const handleCloseSearchBar = useCallback(() => {
+    setIsSearchBarOpen(false);
+  }, []);
 
   const toolbarApi = useMemo(() => ({
     activeTool,
@@ -2425,6 +2560,10 @@ useEffect(() => {
     setIsHighlightView,
     highlightViewCropZoom,
     setHighlightViewCropZoom,
+    isTablet,
+    isSearchBarOpen,
+    toggleSearchBar: handleToggleSearchBar,
+    closeSearchBar: handleCloseSearchBar,
   }), [
     activeTool,
     handleToolSelect,
@@ -2441,6 +2580,10 @@ useEffect(() => {
     searchTerm,
     isHighlightView,
     highlightViewCropZoom,
+    isTablet,
+    isSearchBarOpen,
+    handleToggleSearchBar,
+    handleCloseSearchBar,
   ]);
 
   const clippingsApi = useMemo(() => ({
@@ -2455,6 +2598,8 @@ useEffect(() => {
     uncombine: handleUncombineClipping,
     jumpToPage: setPrimaryPage,
     resolvePrimaryPage: getPrimaryPageFromSource,
+    isCollapsed: isClippingsPanelCollapsed,
+    toggleCollapse: handleToggleClippingsPanel,
   }), [
     clippings,
     selectedClippings,
@@ -2466,6 +2611,8 @@ useEffect(() => {
     handleRemoveClipping,
     handleUncombineClipping,
     setPrimaryPage,
+    isClippingsPanelCollapsed,
+    handleToggleClippingsPanel,
   ]);
 
   const searchApi = useMemo(() => ({
@@ -2557,6 +2704,7 @@ useEffect(() => {
     onDocumentLoadSuccess,
     viewerDeckRef,
     viewerZoomWrapperRef,
+    isPdfOutOfViewport,
     overlayRefs,
     pageRefs,
     primaryScale,
@@ -2582,6 +2730,7 @@ useEffect(() => {
     onDocumentLoadSuccess,
     viewerDeckRef,
     viewerZoomWrapperRef,
+    isPdfOutOfViewport,
     overlayRefs,
     pageRefs,
     primaryScale,
