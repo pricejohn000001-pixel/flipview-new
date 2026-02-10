@@ -190,12 +190,22 @@ export const useDocumentWorkspaceController = () => {
   const [isTablet, setIsTablet] = useState(isTabletInitial);
   const [isRightPanelCollapsed, setIsRightPanelCollapsed] = useState(isTabletInitial);
   const [isClippingsPanelCollapsed, setIsClippingsPanelCollapsed] = useState(isTabletInitial);
-  // Initialize workspace slide:
-  // - Tablets: 50% for a more compact canvas (500px of 1000px visible)
-  // - Desktop: start with ~30% of the workspace visible (300px of 1000px)
+  // Responsive workspace width (px). Start with a computed value based on
+  // viewport but capped at the legacy fixed max.
+  const computeWorkspaceWidth = () => {
+    const vw = typeof window !== 'undefined' ? window.innerWidth : WORKSPACE_FIXED_WIDTH_PX;
+    const max = WORKSPACE_FIXED_WIDTH_PX;
+    const min = 320; // minimum usable workspace width
+    const desired = Math.min(max, Math.floor(vw * 0.8));
+    return Math.max(min, desired);
+  };
+
+  const [workspaceWidth, setWorkspaceWidth] = useState(computeWorkspaceWidth);
+
+  // Initialize workspace slide based on the responsive width
   const initialWorkspaceSlide = isTabletInitial
-    ? WORKSPACE_FIXED_WIDTH_PX / 2
-    : WORKSPACE_FIXED_WIDTH_PX * 0.7;
+    ? Math.floor(workspaceWidth / 2)
+    : Math.floor(workspaceWidth * 0.7);
   const [workspaceSlide, setWorkspaceSlide] = useState(initialWorkspaceSlide);
 
   // refs
@@ -219,6 +229,17 @@ export const useDocumentWorkspaceController = () => {
     runOcrOnAllPages,
     extractTextFromArea,
   } = useOcr({ pdfProxyRef });
+
+  // Update workspaceWidth on viewport resize and clamp slide into bounds
+  useEffect(() => {
+    const handleResize = () => {
+      const w = computeWorkspaceWidth();
+      setWorkspaceWidth(w);
+      setWorkspaceSlide((prev) => clamp(prev, WORKSPACE_SLIDE_MIN, Math.max(WORKSPACE_SLIDE_MIN, w)));
+    };
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, []);
 
   // Tablet detection - typically 768px-1024px width and touch capability
   useEffect(() => {
@@ -293,7 +314,8 @@ export const useDocumentWorkspaceController = () => {
     const handleMove = (event) => {
       const { startX, startSlide } = workspaceResizeMetaRef.current;
       const delta = event.clientX - startX;
-      const nextSlide = clamp(startSlide + delta, WORKSPACE_SLIDE_MIN, WORKSPACE_SLIDE_MAX);
+      const maxSlide = Math.max(WORKSPACE_SLIDE_MIN, workspaceWidth);
+      const nextSlide = clamp(startSlide + delta, WORKSPACE_SLIDE_MIN, maxSlide);
       setWorkspaceSlide(nextSlide);
     };
     const stopResizing = () => {
@@ -307,7 +329,7 @@ export const useDocumentWorkspaceController = () => {
       window.removeEventListener('pointerup', stopResizing);
       window.removeEventListener('pointercancel', stopResizing);
     };
-  }, [isWorkspaceResizing]);
+  }, [isWorkspaceResizing, workspaceWidth]);
 
   useEffect(() => {
     setDrawingState((prev) => {
@@ -711,7 +733,7 @@ useEffect(() => {
       ? (typeof drawingState.opacity === 'number' ? drawingState.opacity : activeBrushOpacity || DEFAULT_BRUSH_OPACITY)
       : null;
 
-  const workspaceVisibleWidth = Math.max(WORKSPACE_FIXED_WIDTH_PX - workspaceSlide, 0);
+  const workspaceVisibleWidth = Math.max(workspaceWidth - workspaceSlide, 0);
   const documentRightPadding = workspaceVisibleWidth + WORKSPACE_RESIZER_WIDTH;
   const updateAnnotations = useCallback((updater) => {
     setAnnotations((prev) => updater(prev).sort((a, b) => a.pageNumber - b.pageNumber));
@@ -2400,8 +2422,9 @@ useEffect(() => {
     if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return;
     event.preventDefault();
     const delta = event.key === 'ArrowRight' ? 40 : -40;
-    setWorkspaceSlide((prev) => clamp(prev + delta, WORKSPACE_SLIDE_MIN, WORKSPACE_SLIDE_MAX));
-  }, []);
+    const maxSlide = Math.max(WORKSPACE_SLIDE_MIN, workspaceWidth);
+    setWorkspaceSlide((prev) => clamp(prev + delta, WORKSPACE_SLIDE_MIN, maxSlide));
+  }, [workspaceWidth]);
 
   const handleManualZoom = useCallback((direction) => {
     setPrimaryScale(prev => {
@@ -2652,6 +2675,7 @@ useEffect(() => {
   const workspaceApi = useMemo(() => ({
     slide: workspaceSlide,
     visibleWidth: workspaceVisibleWidth,
+    width: workspaceWidth,
     items: workspaceItems,
     comments: workspaceComments,
     ref: workspaceRef,
@@ -2676,6 +2700,7 @@ useEffect(() => {
   }), [
     workspaceSlide,
     workspaceVisibleWidth,
+    workspaceWidth,
     workspaceItems,
     workspaceComments,
     workspaceRef,

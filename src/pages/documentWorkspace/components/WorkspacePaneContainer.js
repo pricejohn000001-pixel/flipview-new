@@ -14,6 +14,7 @@ const WorkspacePaneContainer = () => {
   return (
     <WorkspacePane
       workspaceSlide={workspace.slide}
+      workspaceWidth={workspace.width}
       workspaceItems={workspace.items}
       workspaceComments={workspace.comments}
       workspaceRef={workspace.ref}

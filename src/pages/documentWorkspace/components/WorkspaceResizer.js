@@ -1,6 +1,6 @@
 import React from 'react';
 import styles from '../documentWorkspace.module.css';
-import { WORKSPACE_FIXED_WIDTH_PX, WORKSPACE_RESIZER_WIDTH } from '../constants';
+import { WORKSPACE_RESIZER_WIDTH } from '../constants';
 import { useWorkspaceApi } from '../context/DocumentWorkspaceContext';
 
 const WorkspaceResizer = () => {
@@ -9,6 +9,7 @@ const WorkspaceResizer = () => {
     isResizing,
     resizeStart,
     resizeKeyDown,
+    width: workspaceWidth,
   } = useWorkspaceApi();
 
   return (
@@ -17,7 +18,7 @@ const WorkspaceResizer = () => {
       role="separator"
       aria-orientation="vertical"
       aria-valuemin={0}
-      aria-valuemax={WORKSPACE_FIXED_WIDTH_PX}
+      aria-valuemax={Math.round(workspaceWidth || 0)}
       aria-valuenow={Math.round(visibleWidth)}
       tabIndex={0}
       onPointerDown={resizeStart}

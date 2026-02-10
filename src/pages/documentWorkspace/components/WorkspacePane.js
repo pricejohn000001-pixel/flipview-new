@@ -6,7 +6,6 @@ import {
   DEFAULT_BRUSH_OPACITY,
   DEFAULT_BRUSH_SIZE,
   WORKSPACE_ERASER_TOOL_ID,
-  WORKSPACE_FIXED_WIDTH_PX,
 } from '../constants';
 import {
   getPrimaryPageFromSource,
@@ -16,6 +15,7 @@ import {
 
 const WorkspacePane = ({
   workspaceSlide,
+  workspaceWidth,
   workspaceItems,
   workspaceComments,
   workspaceRef,
@@ -80,27 +80,17 @@ const WorkspacePane = ({
     <div
       className={styles.workspacePane}
       style={{
-        width: `${WORKSPACE_FIXED_WIDTH_PX}px`,
+        width: `${workspaceWidth}px`,
         right: `${-workspaceSlide}px`,
       }}
     >
-      <div className={styles.workspaceHeader}>
-        <h3 className={styles.workspaceTitle}>Workspace</h3>
-        <p className={styles.workspaceSubtitle}>
-          Drop clippings here. Drag to rearrange. Click to jump to source.
-        </p>
-      </div>
       <div
         ref={workspaceRef}
         className={styles.workspaceCanvas}
         onPointerMove={handleWorkspacePointerMove}
         onPointerUp={endMoveWorkspaceItem}
       >
-        {workspaceItems.length === 0 ? (
-          <div className={styles.workspaceEmptyState}>
-            <p>Drag clippings from the left panel to this workspace</p>
-          </div>
-        ) : (
+        {
           workspaceItems.map((item) => {
             const itemType = getWorkspaceItemType(item);
             const sourceId = getWorkspaceItemSourceId(item);
@@ -242,7 +232,7 @@ const WorkspacePane = ({
               </div>
             );
           })
-        )}
+        }
 
         <WorkspaceFreehandLayer
           activeTool={activeTool}
