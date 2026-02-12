@@ -1,14 +1,12 @@
 // src/utils/connectors/authContext.js
 import React, { createContext, useState, useEffect } from 'react';
-import { useHistory } from 'react-router-dom';
 
 export const AuthContext = createContext();
 
 export const AuthProvider = ({ children }) => {
-  const history = useHistory();
 
   const [token, setToken] = useState(localStorage.getItem('token'));
-  const [role, setRole] = useState(localStorage.getItem('role'));
+  const [role, setRole] = useState(localStorage.getItem('role') ? Number(localStorage.getItem('role')) : null);
   const [expiry, setExpiry] = useState(localStorage.getItem('tokenExpiry'));
 
   const logout = () => {
@@ -16,7 +14,7 @@ export const AuthProvider = ({ children }) => {
     setToken(null);
     setRole(null);
     setExpiry(null);
-    history.push('/');
+    // Route protection will handle redirect automatically
   };
 
   const login = (token, role, expiresAt) => {

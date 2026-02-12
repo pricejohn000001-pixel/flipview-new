@@ -6,7 +6,6 @@ const api = axios.create({
   baseURL: process.env.BACKEND_BASE_URL,
   headers: {
     "Content-Type": "application/json",
-    Authorization: `Bearer ${process.env.REACT_APP_API_TOKEN}`, // Optional auth
   },
   timeout: 10000, // 10 seconds timeout
 });
@@ -14,9 +13,16 @@ const api = axios.create({
 // Request interceptor (optional)
 api.interceptors.request.use(
   (config) => {
-    // You can modify headers here, e.g., add auth token dynamically
-    // const token = localStorage.getItem("token");
-    // if (token) config.headers.Authorization = `Bearer ${token}`;
+    // Add auth token dynamically from storage
+    const token = localStorage.getItem("token") || sessionStorage.getItem("token");
+
+    if (token) {
+      // Use bracket notation for compatibility with different Axios versions
+      config.headers["Authorization"] = `Bearer ${token}`;
+    } else if (process.env.REACT_APP_API_TOKEN) {
+      config.headers["Authorization"] = `Bearer ${process.env.REACT_APP_API_TOKEN}`;
+    }
+
     return config;
   },
   (error) => Promise.reject(error)

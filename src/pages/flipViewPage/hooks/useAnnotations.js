@@ -84,7 +84,7 @@ export const useAnnotations = (pdfId, token) => {
     setLocalAnnotationsByPage(prev => {
       const prevEntry = prev[pageNum] || { annotations: [], pending: [] };
       if (JSON.stringify(prevEntry.annotations) === JSON.stringify(anns)
-          && JSON.stringify(prevEntry.pending) === JSON.stringify(pending)) {
+        && JSON.stringify(prevEntry.pending) === JSON.stringify(pending)) {
         return prev;
       }
       return {
@@ -165,15 +165,15 @@ export const useAnnotations = (pdfId, token) => {
       const addShape = (s, attachedComments = [], fromServer = false) => {
         if (!s) return;
         const id = s.id ?? s.tempId ?? null;
-        
+
         // Don't add shapes that are from server (already saved)
         if (fromServer) return;
-        
+
         if (id && serverShapeIds.has(id)) {
           // This shape is already on the server, skip it
           return;
         }
-        
+
         if (id) {
           if (seenIds.has(id)) return;
           seenIds.add(id);

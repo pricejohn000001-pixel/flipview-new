@@ -55,3 +55,54 @@
 .activeNavLink {
   color: #f3ce0f;
 }
+
+/* Tablet and Mobile Responsiveness */
+@media (max-width: 768px) {
+  .navbar {
+    flex-direction: column;
+    padding: 1rem;
+    gap: 1rem;
+  }
+
+  .navLinks {
+    gap: 1rem;
+    flex-wrap: wrap;
+    justify-content: center;
+  }
+
+  .logo {
+    height: 40px;
+  }
+
+  .siteName {
+    font-size: 1.1rem;
+  }
+
+  .navLink {
+    font-size: 0.9rem;
+  }
+}
+
+@media (max-width: 480px) {
+  .logoContainer {
+    flex-direction: column;
+    text-align: center;
+  }
+
+  .logo {
+    margin-right: 0;
+    margin-bottom: 0.5rem;
+  }
+
+  .navLinks {
+    gap: 0.8rem;
+  }
+
+  .navLink {
+    font-size: 0.85rem;
+  }
+
+  .icon {
+    margin-right: 0.3rem;
+  }
+}

@@ -29,6 +29,7 @@ export const useRightPanelApi = () => useDocumentWorkspaceContext().rightPanel;
 export const useWorkspaceApi = () => useDocumentWorkspaceContext().workspace;
 export const useDocumentApi = () => useDocumentWorkspaceContext().document;
 export const useConnectorsApi = () => useDocumentWorkspaceContext().connectors;
+export const useCommentModalApi = () => useDocumentWorkspaceContext().commentModal;
 
 export default DocumentWorkspaceContext;
 

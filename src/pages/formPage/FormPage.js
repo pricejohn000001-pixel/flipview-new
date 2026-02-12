@@ -35,6 +35,22 @@ const FormPage = () => {
   const [pdfFile, setPdfFile] = useState(null);
   const [pdfId, setPdfId] = useState(null); // store pdf_id after upload
   const [caseStatus, setCaseStatus] = useState(null);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [errorMessage, setErrorMessage] = useState('');
+  const [successMessage, setSuccessMessage] = useState('');
+
+  // 🔹 Auto-clear success message after 4s
+  useEffect(() => {
+    if (successMessage) {
+      const timer = setTimeout(() => setSuccessMessage(''), 4000);
+      return () => clearTimeout(timer);
+    }
+  }, [successMessage]);
+
+  const yearOptions = Array.from({ length: new Date().getFullYear() - 1948 + 1 }, (_, i) => {
+    const year = new Date().getFullYear() - i;
+    return { value: year.toString(), label: year.toString() };
+  });
 
   const statusOptions = [
     { value: 'disposed', label: 'Disposed', icon: <FaCheckCircle color="#2e7d32" /> },
@@ -138,6 +154,10 @@ const FormPage = () => {
 
   // 🔹 Handle form submit with scroll/shake for missing fields
   const handleSubmit = async () => {
+    // Clear previous errors/success
+    setErrorMessage('');
+    setSuccessMessage('');
+
     const requiredFields = [
       { id: 'lcrCaseType', value: lcrCaseType },
       { id: 'lcrCaseNo', value: lcrCaseNo },
@@ -181,15 +201,37 @@ const FormPage = () => {
       is_fixed: nextDateType === 'fixed' ? 1 : 0,
     };
 
+    setIsSubmitting(true);
     try {
       const res = await axios.post(
-        `${process.env.BACKEND_BASE_URL}admin/order-data`,
+        `${process.env.BACKEND_BASE_URL}admin/all-orders`,
         payload,
         { headers: { Authorization: `Bearer ${token}` } }
       );
-      history.push('/view-report');
+
+      setSuccessMessage('Report submitted successfully!');
+
+      // ✅ Clear form fields
+      setLcrCaseType(null);
+      setLcrCaseNo('');
+      setLcrYear('');
+      setHcCaseType(null);
+      setHcCaseNo('');
+      setHcYear('');
+      setOrderDate(null);
+      setNextDate(null);
+      setSomeDateText('');
+      setPdfFile(null);
+      setPdfId(null);
+      setCaseStatus(null);
+
+      // history.push('/view-report'); // Removed redirection
     } catch (err) {
       console.error('Form submit error:', err.response?.data || err.message);
+      const errorMsg = err.response?.data?.message || 'Failed to submit report. Please try again.';
+      setErrorMessage(errorMsg);
+    } finally {
+      setIsSubmitting(false);
     }
   };
 
@@ -221,13 +263,16 @@ const FormPage = () => {
             </div>
             <div className={styles['form-group']}>
               <label htmlFor="lcrYear">Year *</label>
-              <select id="lcrYear" value={lcrYear} onChange={(e) => setLcrYear(e.target.value)}>
-                <option value="">Select Year</option>
-                {Array.from({ length: 30 }, (_, i) => {
-                  const year = new Date().getFullYear() - i;
-                  return <option key={year} value={year}>{year}</option>;
-                })}
-              </select>
+              <div id="lcrYear">
+                <Select
+                  value={lcrYear ? { value: lcrYear, label: lcrYear } : null}
+                  onChange={(opt) => setLcrYear(opt ? opt.value : '')}
+                  options={yearOptions}
+                  isClearable
+                  placeholder="Select Year"
+                  menuPlacement="bottom"
+                />
+              </div>
             </div>
             <div className={styles['form-group']}>
               <label>Case Status *</label>
@@ -273,13 +318,16 @@ const FormPage = () => {
             </div>
             <div className={styles['form-group']}>
               <label htmlFor="hcYear">Year *</label>
-              <select id="hcYear" value={hccYear} onChange={(e) => setHcYear(e.target.value)}>
-                <option value="">Select Year</option>
-                {Array.from({ length: 30 }, (_, i) => {
-                  const year = new Date().getFullYear() - i;
-                  return <option key={year} value={year}>{year}</option>;
-                })}
-              </select>
+              <div id="hcYear">
+                <Select
+                  value={hccYear ? { value: hccYear, label: hccYear } : null}
+                  onChange={(opt) => setHcYear(opt ? opt.value : '')}
+                  options={yearOptions}
+                  isClearable
+                  placeholder="Select Year"
+                  menuPlacement="bottom"
+                />
+              </div>
             </div>
           </div>
         </div>
@@ -314,11 +362,34 @@ const FormPage = () => {
             </div>
           </div>
 
+          {errorMessage && (
+            <div className={styles['error-alert']}>
+              <strong>Error:</strong> {errorMessage}
+            </div>
+          )}
+
           <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: '2rem', width: '100%' }}>
-            <button onClick={handleSubmit} className={styles['submit-button']}>Submit Report</button>
+            <button
+              onClick={handleSubmit}
+              className={styles['submit-button']}
+              disabled={isSubmitting}
+            >
+              {isSubmitting && <span className={styles['button-spinner']}></span>}
+              {isSubmitting ? 'Submitting...' : 'Submit Report'}
+            </button>
           </div>
         </div>
       </div>
+
+      {/* 🔹 Toast Notification */}
+      {successMessage && (
+        <div className={styles['toast-container']}>
+          <div className={styles['toast']}>
+            <strong>Success</strong>
+            {successMessage}
+          </div>
+        </div>
+      )}
     </div>
   );
 };

@@ -20,14 +20,16 @@ const ViewReportPage = () => {
   const [currentPage, setCurrentPage] = useState(1);
   const [perPage, setPerPage] = useState(5);
   const [total, setTotal] = useState(0);
+  const [isLoading, setIsLoading] = useState(false);
+  const [errorMessage, setErrorMessage] = useState('');
   const { setPdfData } = usePdf();
-const history = useHistory();
+  const history = useHistory();
 
 
   const totalPages = Math.ceil(total / perPage);
 
   const token = localStorage.getItem('token');
-  const role = localStorage.getItem('role'); 
+  const role = localStorage.getItem('role');
 
   const handleViewPdf = (item) => {
     sessionStorage.setItem("pdfUrl", `${process.env.BACKEND_PDF_URL}${item.pdfName}`);
@@ -61,6 +63,8 @@ const history = useHistory();
 
   // Fetch order-data with filters
   const fetchData = async (page = 1) => {
+    setIsLoading(true);
+    setErrorMessage(''); // Clear previous errors
     try {
       const params = {
         page,
@@ -71,9 +75,9 @@ const history = useHistory();
 
       let endpoint = '';
       if (role === '1') {
-        endpoint = 'admin/order-data';
+        endpoint = 'admin/all-orders';
       } else if (role === '2') {
-        endpoint = 'user/order-data'; // Adjust this to the correct endpoint for role 2
+        endpoint = 'user/all-orders'; // Adjust this to the correct endpoint for role 2
       } else {
         console.warn('Unknown role:', role);
         return;
@@ -93,6 +97,10 @@ const history = useHistory();
       setCurrentPage(pageData?.current_page || 1);
     } catch (err) {
       console.error('Error fetching order-data:', err);
+      const errorMsg = err.response?.data?.message || 'Failed to load reports. Please try again.';
+      setErrorMessage(errorMsg);
+    } finally {
+      setIsLoading(false);
     }
   };
 
@@ -165,64 +173,73 @@ const history = useHistory();
 
         <div className={styles['results-card']}>
           <h3>Results</h3>
-          {rawData.length === 0 ? (
+          {errorMessage && (
+            <div className={styles['error-alert']}>
+              <strong>Error:</strong> {errorMessage}
+            </div>
+          )}
+          {isLoading ? (
+            <div className={styles['loading-container']}>
+              <div className={styles['spinner']}></div>
+              <p>Loading reports...</p>
+            </div>
+          ) : rawData.length === 0 ? (
             <p className={styles['no-results']}>No results found.</p>
           ) : (
             <>
-            <div className={styles['table-container']}>
-              <table className={styles['results-table']}>
-                <thead>
-                  <tr>
-                    <th>Sl.No</th>
-                    <th>LCR Case No.</th>
-                    <th>LCR Case Name</th>
-                    <th>HC Case No.</th>
-                    <th>HC Case Name</th>
-                    <th>Order Date</th>
-                    <th>Case Status</th>
-                    <th>PDF</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {rawData.map((item, index) => (
-                    <tr key={item.id}>
-                      <td>{(currentPage - 1) * perPage + index + 1}</td>
-                      <td>{item.lcrCaseNo}</td>
-                      <td>{item.lcrCaseName}</td>
-                      <td>{item.hccCaseNo}</td>
-                      <td>{item.hccCaseName}</td>
-                      <td>{new Date(item.order_date).toLocaleDateString()}</td>
-                      <td>
-                        <span
-                          className={`${styles['status-badge']} ${
-                            item.case_status === 'pending'
+              <div className={styles['table-container']}>
+                <table className={styles['results-table']}>
+                  <thead>
+                    <tr>
+                      <th>Sl.No</th>
+                      <th>LCR Case No.</th>
+                      <th>LCR Case Name</th>
+                      <th>HC Case No.</th>
+                      <th>HC Case Name</th>
+                      <th>Order Date</th>
+                      <th>Case Status</th>
+                      <th>PDF</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {rawData.map((item, index) => (
+                      <tr key={item.id}>
+                        <td>{(currentPage - 1) * perPage + index + 1}</td>
+                        <td>{item.lcrCaseNo}</td>
+                        <td>{item.lcrCaseName}</td>
+                        <td>{item.hccCaseNo}</td>
+                        <td>{item.hccCaseName}</td>
+                        <td>{new Date(item.order_date).toLocaleDateString()}</td>
+                        <td>
+                          <span
+                            className={`${styles['status-badge']} ${item.case_status === 'pending'
                               ? styles['pending']
                               : item.case_status === 'stayed'
-                              ? styles['stayed']
-                              : item.case_status === 'disposed'
-                              ? styles['disposed']
-                              : ''
-                          }`}
-                        >
-                          {item.case_status.charAt(0).toUpperCase() + item.case_status.slice(1)}
-                        </span>
-                      </td>
-                      <td>
-                        <button className={styles['link-button']} onClick={() => handleViewPdf(item)}>
-                          View PDF
-                        </button>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+                                ? styles['stayed']
+                                : item.case_status === 'disposed'
+                                  ? styles['disposed']
+                                  : ''
+                              }`}
+                          >
+                            {item.case_status.charAt(0).toUpperCase() + item.case_status.slice(1)}
+                          </span>
+                        </td>
+                        <td>
+                          <button className={styles['link-button']} onClick={() => handleViewPdf(item)}>
+                            View PDF
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
 
               {/* Pagination */}
               <div className={styles['pagination']}>
                 <button
                   onClick={() => handlePageChange(currentPage - 1)}
-                  disabled={currentPage === 1}
+                  disabled={currentPage === 1 || isLoading}
                 >
                   ⬅ Prev
                 </button>
@@ -237,7 +254,7 @@ const history = useHistory();
                 ))}
                 <button
                   onClick={() => handlePageChange(currentPage + 1)}
-                  disabled={currentPage === totalPages}
+                  disabled={currentPage === totalPages || isLoading}
                 >
                   Next ➡
                 </button>

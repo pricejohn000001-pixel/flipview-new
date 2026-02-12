@@ -48,13 +48,26 @@ const DocumentPane = () => {
 
   // Local state for PDF document to access page metadata
   const [pdfDocument, setPdfDocument] = useState(null);
-  
+
   const handleDocumentLoadSuccess = (pdf) => {
     setPdfDocument(pdf);
     if (onContextDocumentLoadSuccess) {
       onContextDocumentLoadSuccess(pdf);
     }
   };
+
+  // PDF URL and ID from sessionStorage
+  const [pdfUrl, setPdfUrl] = useState(null);
+  const [pdfId, setPdfId] = useState(null);
+
+  // Read PDF URL and ID from sessionStorage on mount
+  useEffect(() => {
+    const url = sessionStorage.getItem('pdfUrl');
+    const id = sessionStorage.getItem('pdfId');
+
+    if (url) setPdfUrl(url);
+    if (id) setPdfId(id);
+  }, []);
 
   // Virtualization: track which pages are near the viewport
   const [visiblePages, setVisiblePages] = useState(() => new Set());
@@ -66,18 +79,18 @@ const DocumentPane = () => {
     if (!pdfDocument || !numPages) return;
 
     let isMounted = true;
-    
+
     const calculateHeights = async () => {
       try {
-        const MAX_PAGES_TO_MEASURE = 200; 
-        
+        const MAX_PAGES_TO_MEASURE = 200;
+
         const heights = {};
-        
+
         // Measure page 1 at scale 1.0
         const page1 = await pdfDocument.getPage(1);
         const viewport1 = page1.getViewport({ scale: 1 });
         const defaultHeight = viewport1.height;
-        
+
         // Fill all with default first
         for (let i = 1; i <= numPages; i++) {
           heights[i] = defaultHeight;
@@ -85,24 +98,24 @@ const DocumentPane = () => {
 
         // If not too many pages, measure individually
         if (numPages <= MAX_PAGES_TO_MEASURE) {
-            const promises = [];
-            for (let i = 2; i <= numPages; i++) {
-                promises.push(pdfDocument.getPage(i).then(p => ({
-                    pageNumber: i,
-                    height: p.getViewport({ scale: 1 }).height
-                })));
-            }
-            
-            const results = await Promise.all(promises);
-            if (!isMounted) return;
-            
-            results.forEach(r => {
-                heights[r.pageNumber] = r.height;
-            });
+          const promises = [];
+          for (let i = 2; i <= numPages; i++) {
+            promises.push(pdfDocument.getPage(i).then(p => ({
+              pageNumber: i,
+              height: p.getViewport({ scale: 1 }).height
+            })));
+          }
+
+          const results = await Promise.all(promises);
+          if (!isMounted) return;
+
+          results.forEach(r => {
+            heights[r.pageNumber] = r.height;
+          });
         }
-        
+
         if (isMounted) {
-            setPageUnscaledHeights(heights);
+          setPageUnscaledHeights(heights);
         }
       } catch (err) {
         console.error("Error calculating page heights:", err);
@@ -172,11 +185,10 @@ const DocumentPane = () => {
     >
       <div
         ref={viewerZoomWrapperRef}
-        className={`${styles.viewerZoomWrapper} ${
-          isPdfOutOfViewport ? styles.viewerZoomWrapperLeftAligned : ''
-        }`}
+        className={`${styles.viewerZoomWrapper} ${isPdfOutOfViewport ? styles.viewerZoomWrapperLeftAligned : ''
+          }`}
       >
-        <Document file={demoPdf} onLoadSuccess={handleDocumentLoadSuccess}>
+        <Document file={pdfUrl || demoPdf} onLoadSuccess={handleDocumentLoadSuccess}>
           <section
             className={styles.multiPageContainer}
             data-highlight-view={isHighlightView ? 'true' : undefined}
@@ -197,24 +209,24 @@ const DocumentPane = () => {
               const highlightStyle =
                 isHighlightView && pageBounds?.hasHighlights
                   ? (() => {
-                      const style = {
-                        clipPath: `inset(${pageBounds.clipTop}% 0% ${pageBounds.clipBottom}% 0%)`,
-                        transition:
-                          'clip-path 0.4s cubic-bezier(0.4, 0, 0.2, 1), -webkit-mask-image 0.4s cubic-bezier(0.4, 0, 0.2, 1), mask-image 0.4s cubic-bezier(0.4, 0, 0.2, 1)',
-                      };
-                      if (pageBounds.maskImage && pageBounds.maskStrength > 0) {
-                        style.WebkitMaskImage = pageBounds.maskImage;
-                        style.maskImage = pageBounds.maskImage;
-                        style.WebkitMaskComposite = 'source-in';
-                        style.maskComposite = 'intersect';
-                      }
-                      return style;
-                    })()
+                    const style = {
+                      clipPath: `inset(${pageBounds.clipTop}% 0% ${pageBounds.clipBottom}% 0%)`,
+                      transition:
+                        'clip-path 0.4s cubic-bezier(0.4, 0, 0.2, 1), -webkit-mask-image 0.4s cubic-bezier(0.4, 0, 0.2, 1), mask-image 0.4s cubic-bezier(0.4, 0, 0.2, 1)',
+                    };
+                    if (pageBounds.maskImage && pageBounds.maskStrength > 0) {
+                      style.WebkitMaskImage = pageBounds.maskImage;
+                      style.maskImage = pageBounds.maskImage;
+                      style.WebkitMaskComposite = 'source-in';
+                      style.maskComposite = 'intersect';
+                    }
+                    return style;
+                  })()
                   : undefined;
 
               // Use pre-calculated height or a fallback estimate
-              const heightStyle = pageUnscaledHeights[pageNumber] 
-                ? `${pageUnscaledHeights[pageNumber] * primaryScale}px` 
+              const heightStyle = pageUnscaledHeights[pageNumber]
+                ? `${pageUnscaledHeights[pageNumber] * primaryScale}px`
                 : `${Math.round(800 * primaryScale)}px`; // Fallback while loading
 
               return (
@@ -225,7 +237,7 @@ const DocumentPane = () => {
                   }}
                   className={styles.pageWrapper}
                   data-page-number={pageNumber}
-                  style={{ minHeight: heightStyle, height: heightStyle }} 
+                  style={{ minHeight: heightStyle, height: heightStyle }}
                 >
                   {visiblePages.has(pageNumber) ? (
                     <div
@@ -238,7 +250,7 @@ const DocumentPane = () => {
                       <Page
                         pageNumber={pageNumber}
                         scale={primaryScale}
-                        renderTextLayer={false}
+                        renderTextLayer={true}
                         renderAnnotationLayer={false}
                         className={styles.pdfPage}
                         data-drawing-active={

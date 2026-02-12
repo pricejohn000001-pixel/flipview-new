@@ -194,15 +194,18 @@ select:focus {
 }
 
 .pending {
-  background-color: #f59e0b; /* yellow/orange */
+  background-color: #f59e0b;
+  /* yellow/orange */
 }
 
 .stayed {
-  background-color: #3b82f6; /* blue */
+  background-color: #3b82f6;
+  /* blue */
 }
 
 .disposed {
-  background-color: #10b981; /* green */
+  background-color: #10b981;
+  /* green */
 }
 
 .table-container {
@@ -240,3 +243,46 @@ select:focus {
   outline-offset: 2px;
 }
 
+/* Loading spinner styles */
+.loading-container {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 3rem;
+  color: #555;
+}
+
+.spinner {
+  width: 40px;
+  height: 40px;
+  border: 4px solid #f3f3f3;
+  border-top: 4px solid #1976d2;
+  border-radius: 50%;
+  animation: spin 1s linear infinite;
+  margin-bottom: 1rem;
+}
+
+@keyframes spin {
+  0% {
+    transform: rotate(0deg);
+  }
+
+  100% {
+    transform: rotate(360deg);
+  }
+}
+
+.error-alert {
+  background-color: #fee;
+  border: 1px solid #fcc;
+  border-radius: 0.5rem;
+  padding: 1rem;
+  margin-bottom: 1rem;
+  color: #c00;
+}
+
+.error-alert strong {
+  display: block;
+  margin-bottom: 0.25rem;
+}

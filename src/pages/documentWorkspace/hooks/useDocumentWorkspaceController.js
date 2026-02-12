@@ -7,6 +7,8 @@ import {
 } from 'react';
 import { pdfjs } from 'react-pdf';
 import useOcr from './useOcr';
+import { usePdf } from '../../../utils/helpers/pdfContext';
+import { saveAnnotations, saveAnnotation, fetchAnnotations } from '../../../utils/connectors/annotationApi';
 import {
   ANNOTATION_TYPES,
   COLOR_OPTIONS,
@@ -147,6 +149,10 @@ export const useDocumentWorkspaceController = () => {
   // base annotation/bookmark state (your existing features)
   const [annotations, setAnnotations] = useState([]);
   const [bookmarks, setBookmarks] = useState([]);
+
+  // Auto-save state tracking
+  const [savedAnnotationIds, setSavedAnnotationIds] = useState(new Set());
+  const autoSaveTimerRef = useRef(null);
   const [annotationFilters, setAnnotationFilters] = useState(() => ANNOTATION_TYPES.reduce((acc, type) => ({ ...acc, [type]: true }), {}));
   const [activeTool, setActiveTool] = useState('select');
   const [activeColor, setActiveColor] = useState(COLOR_OPTIONS[0]);
@@ -156,6 +162,8 @@ export const useDocumentWorkspaceController = () => {
   const [isPressureEnabled, setIsPressureEnabled] = useState(true);
   const [isFreehandPaletteOpen, setIsFreehandPaletteOpen] = useState(false);
   const [isFreehandCommentMode, setIsFreehandCommentMode] = useState(false);
+  // Comment modal state: { sourceRect, pageNumber, sourceType, quoteText, createAnnotation }
+  const [commentModalData, setCommentModalData] = useState(null);
   const [isSearchBarOpen, setIsSearchBarOpen] = useState(false);
   const [isWorkspaceResizing, setIsWorkspaceResizing] = useState(false);
   const [selectionMenu, setSelectionMenu] = useState(null);
@@ -215,10 +223,27 @@ export const useDocumentWorkspaceController = () => {
   const viewerZoomWrapperRef = useRef(null);
   const viewerDeckRef = useRef(null);
   const workspaceResizeMetaRef = useRef({ startX: 0, startSlide: initialWorkspaceSlide });
-  
+
   // Page position tracking for annotation rail
   const [pagePositions, setPagePositions] = useState({}); // { pageNumber: { top, height } }
   const pageRefs = useRef({}); // { pageNumber: DOMElement }
+
+  // Force connector update on layout changes (after transition)
+  const [layoutVersion, setLayoutVersion] = useState(0);
+  useEffect(() => {
+    const triggerUpdate = () => setLayoutVersion((v) => v + 1);
+    // Immediate update
+    triggerUpdate();
+    // Delayed update to catch end of CSS transitions
+    const timeout = setTimeout(triggerUpdate, 350);
+    return () => clearTimeout(timeout);
+  }, [
+    workspaceWidth,
+    workspaceSlide,
+    isRightPanelCollapsed,
+    isClippingsPanelCollapsed,
+    isSearchBarOpen,
+  ]);
 
   const {
     ocrResults,
@@ -229,6 +254,86 @@ export const useDocumentWorkspaceController = () => {
     runOcrOnAllPages,
     extractTextFromArea,
   } = useOcr({ pdfProxyRef });
+
+  // Get PDF ID from context for auto-save
+  const { pdfId } = usePdf();
+
+  // Auto-save annotations after user pauses (2 seconds debounce)
+  useEffect(() => {
+    // Clear any existing timer
+    if (autoSaveTimerRef.current) {
+      clearTimeout(autoSaveTimerRef.current);
+    }
+
+    // Find annotations that haven't been saved yet (exclude notes - they should never be auto-saved to API)
+    const unsavedAnnotations = annotations.filter(
+      annotation => !savedAnnotationIds.has(annotation.id) && !annotation.isTemporary && annotation.type !== 'comment'
+    );
+
+    // Also check for unsaved clippings
+    const unsavedClippings = clippings.filter(
+      clip => !savedAnnotationIds.has(clip.id) && !clip.isTemporary
+    ).map(clip => ({ ...clip, type: 'clipping' })); // Ensure type is clipping
+
+    const allUnsaved = [...unsavedAnnotations, ...unsavedClippings];
+
+    // Only proceed if there are unsaved items and we have a PDF ID
+    if (allUnsaved.length === 0 || !pdfId) {
+      return;
+    }
+
+    // Set a timer to auto-save after 2 seconds of inactivity
+    autoSaveTimerRef.current = setTimeout(async () => {
+      console.log(`[Workspace] Auto-saving ${allUnsaved.length} items (${unsavedAnnotations.length} annotations, ${unsavedClippings.length} clippings) after pause...`);
+
+      try {
+        const results = await saveAnnotations(allUnsaved, pdfId);
+
+        // Mark successfully saved annotations
+        const newlySavedIds = new Set(savedAnnotationIds);
+        results.forEach(result => {
+          if (result.success) {
+            newlySavedIds.add(result.annotationId);
+          }
+        });
+
+        setSavedAnnotationIds(newlySavedIds);
+
+        const successCount = results.filter(r => r.success).length;
+        const failureCount = results.length - successCount;
+
+        if (successCount > 0) {
+          console.log(`[Workspace] Auto-save complete: ${successCount} saved, ${failureCount} failed`);
+        }
+      } catch (error) {
+        console.error('[Workspace] Auto-save error:', error);
+      }
+    }, 2000); // 2 second debounce
+
+    // Cleanup function
+    return () => {
+      if (autoSaveTimerRef.current) {
+        clearTimeout(autoSaveTimerRef.current);
+      }
+    };
+  }, [annotations, clippings, savedAnnotationIds, pdfId]);
+
+  // Auto-close side nav after OCR finishes
+  useEffect(() => {
+    let timeout;
+    if (!isOcrRunning && !isClippingOcrRunning) {
+      // Check if ocrResults has any content to ensure we only close after some OCR happened
+      const hasResults = Object.keys(ocrResults).length > 0;
+      if (hasResults) {
+        timeout = setTimeout(() => {
+          setIsRightPanelCollapsed(true);
+        }, 2000);
+      }
+    }
+    return () => {
+      if (timeout) clearTimeout(timeout);
+    };
+  }, [isOcrRunning, isClippingOcrRunning, ocrResults]);
 
   // Update workspaceWidth on viewport resize and clamp slide into bounds
   useEffect(() => {
@@ -250,14 +355,14 @@ export const useDocumentWorkspaceController = () => {
       // Tablet: width between 768-1400px (or wider in landscape), touch capable, and landscape orientation
       const isTabletDevice = isTouchDevice && width >= 768 && width <= 1400 && (width > height);
       setIsTablet(isTabletDevice);
-      
+
       // Keep panels collapsed for tablets when in landscape
       if (isTabletDevice) {
         setIsRightPanelCollapsed(true);
         setIsClippingsPanelCollapsed(true);
       }
     };
-    
+
     // Check immediately and on resize/orientation change
     checkTablet();
     window.addEventListener('resize', checkTablet);
@@ -360,11 +465,11 @@ export const useDocumentWorkspaceController = () => {
     if (!range) return null;
     const rect = range.getBoundingClientRect();
     if (!rect || rect.width < 2 || rect.height < 2) return null;
-    
+
     // Check each overlay to see which one contains the selection
     const selectionCenterX = rect.left + rect.width / 2;
     const selectionCenterY = rect.top + rect.height / 2;
-    
+
     for (const [pageNumStr, overlay] of Object.entries(overlayRefs.current)) {
       if (!overlay) continue;
       const overlayRect = overlay.getBoundingClientRect();
@@ -436,12 +541,130 @@ export const useDocumentWorkspaceController = () => {
   //   }
   // }, [isPdfReady, primaryPage, ocrResults, isOcrRunning, runOcrOnPage]);
 
-useEffect(() => {
-  if (isPdfReady && pdfProxyRef.current) {
-    runOcrOnAllPages();
-  }
-}, [isPdfReady, pdfProxyRef]);
+  useEffect(() => {
+    if (isPdfReady && pdfProxyRef.current) {
+      runOcrOnAllPages();
+    }
+  }, [isPdfReady, pdfProxyRef]);
 
+  // Load saved annotations from API when PDF is ready
+  useEffect(() => {
+    console.log(`[Workspace] useEffect triggered - isPdfReady: ${isPdfReady}, pdfId: ${pdfId}`);
+
+    const loadAnnotations = async () => {
+      if (!isPdfReady || !pdfId) {
+        console.log('[Workspace] Skipping annotation load - conditions not met');
+        return;
+      }
+
+      try {
+        // TODO: Get actual user ID from authentication context
+        // For now, using a hardcoded value or from sessionStorage
+        const userId = sessionStorage.getItem('userId') || 2;
+
+        console.log(`[Workspace] Loading annotations for PDF ${pdfId}, User ${userId}`);
+        const loadedAnnotations = await fetchAnnotations(pdfId, userId);
+
+        console.log(`[Workspace] Received ${loadedAnnotations.length} annotations from API`);
+        console.log(`[Workspace] Sample annotation:`, loadedAnnotations[0]);
+
+        if (loadedAnnotations.length > 0) {
+          // Separate workspace comments from PDF annotations
+          const pdfAnnotations = [];
+          const comments = [];
+          const clippingsList = [];
+          const items = [];
+
+          // Sort by page number for top-down layout
+          const sortedAnnotations = [...loadedAnnotations].sort((a, b) => (a.pageNumber || 0) - (b.pageNumber || 0));
+
+          let currentY = 0.02;
+          const Y_OFFSET = 0.12;
+
+          sortedAnnotations.forEach((annotation) => {
+            if (annotation.type === 'comment') {
+              // This is a workspace comment - add it to workspace comments
+              const commentId = `comment-${annotation.id}`;
+              comments.push({
+                id: commentId,
+                content: annotation.content || '',
+                quoteText: annotation.linkedText || null, // Used for display in the comment card
+                linkedText: annotation.linkedText || null, // Keep for compatibility
+                createdAt: annotation.createdAt,
+                pageNumber: annotation.pageNumber,
+                position: annotation.position,
+                sourceRect: annotation.position, // Add sourceRect for connectors
+                color: annotation.color,
+              });
+
+              // Create a workspace item for this comment
+              items.push({
+                id: `ws-item-comment-${annotation.id}`,
+                type: 'comment',
+                sourceId: commentId,
+                x: WORKSPACE_LEFT_STACK_X,
+                y: currentY,
+              });
+              currentY = clamp(currentY + Y_OFFSET, 0.02, 0.95);
+            } else if (annotation.type === 'clipping' || annotation.type === 'combined') {
+              // This is a clipping
+              clippingsList.push(annotation);
+
+              items.push({
+                id: `ws-item-clip-${annotation.id}`,
+                type: 'clip',
+                sourceId: annotation.id,
+                // Position slightly offset from comments
+                x: WORKSPACE_LEFT_STACK_X + 0.05,
+                y: currentY,
+              });
+              currentY = clamp(currentY + Y_OFFSET, 0.02, 0.95);
+            } else {
+              // This is a PDF annotation (highlight, underline, strike, freehand)
+              pdfAnnotations.push(annotation);
+            }
+          });
+
+          // Update state
+          if (pdfAnnotations.length > 0) {
+            setAnnotations(pdfAnnotations);
+            const savedIds = new Set(pdfAnnotations.map(ann => ann.id));
+            setSavedAnnotationIds(savedIds); // WARNING: This overwrites! Should be cumulative if multiple concurrent loads? 
+            // In this loading effect, it's initial load, so overwrite is fine.
+            // But wait, we need to add clipping IDs to savedIds too.
+            // Let's postpone savedIds update until we collect all IDs.
+          }
+
+          if (clippingsList.length > 0) {
+            setClippings(clippingsList);
+          }
+
+          if (comments.length > 0 || clippingsList.length > 0) {
+            setWorkspaceComments(comments);
+            setWorkspaceItems(prevItems => [...prevItems, ...items]);
+            console.log(`[Workspace] Loaded ${comments.length} comments, ${clippingsList.length} clippings`);
+          }
+
+          // Combine all IDs for savedAnnotationIds
+          const allSavedIds = new Set([
+            ...pdfAnnotations.map(a => a.id),
+            ...clippingsList.map(c => c.id)
+          ]);
+          setSavedAnnotationIds(allSavedIds);
+
+          console.log(`[Workspace] Total: ${pdfAnnotations.length} PDF annotations, ${comments.length} comments, ${clippingsList.length} clippings`);
+
+          console.log(`[Workspace] Total: ${pdfAnnotations.length} PDF annotations, ${comments.length} workspace comments`);
+        } else {
+          console.log('[Workspace] No annotations to load');
+        }
+      } catch (error) {
+        console.error('[Workspace] Failed to load annotations:', error);
+      }
+    };
+
+    loadAnnotations();
+  }, [isPdfReady, pdfId]);
 
 
   // ---------- annotation helpers ----------
@@ -458,7 +681,7 @@ useEffect(() => {
   const highlightBoundsPerPage = useMemo(() => {
     const bounds = {};
     const highlightRectsPerPage = {}; // Store individual annotation rectangles per page
-    
+
     // First pass: collect all individual annotation rectangles (all types)
     filteredAnnotations.forEach((ann) => {
       const pageNum = ann.pageNumber;
@@ -466,7 +689,7 @@ useEffect(() => {
         highlightRectsPerPage[pageNum] = [];
         bounds[pageNum] = { minX: 1, minY: 1, maxX: 0, maxY: 0, hasHighlights: false };
       }
-      
+
       // Handle different annotation types
       if (ann.type === 'highlight') {
         if (ann.position) {
@@ -514,11 +737,11 @@ useEffect(() => {
           const minY = Math.min(...ys);
           const maxY = Math.max(...ys);
           const strokeWidth = (ann.strokeWidth || DEFAULT_BRUSH_SIZE) / 100; // Normalize stroke width
-          highlightRectsPerPage[pageNum].push({ 
-            top: Math.max(0, minY - strokeWidth), 
-            bottom: Math.min(1, maxY + strokeWidth), 
-            left: Math.max(0, minX - strokeWidth), 
-            right: Math.min(1, maxX + strokeWidth) 
+          highlightRectsPerPage[pageNum].push({
+            top: Math.max(0, minY - strokeWidth),
+            bottom: Math.min(1, maxY + strokeWidth),
+            left: Math.max(0, minX - strokeWidth),
+            right: Math.min(1, maxX + strokeWidth)
           });
           bounds[pageNum].minX = Math.min(bounds[pageNum].minX, Math.max(0, minX - strokeWidth));
           bounds[pageNum].minY = Math.min(bounds[pageNum].minY, Math.max(0, minY - strokeWidth));
@@ -539,7 +762,7 @@ useEffect(() => {
         }
       }
     });
-    
+
     // LiquidText behavior: 
     // - Only crop height (top/bottom), not width (left/right)
     // - Gradual cropping based on zoom: more zoom = tighter crop until only highlights show
@@ -549,19 +772,19 @@ useEffect(() => {
     Object.keys(bounds).forEach((pageNum) => {
       const b = bounds[pageNum];
       if (!b.hasHighlights) return;
-      
+
       // Group highlights that are close together vertically (within 2% of page height)
       // This helps identify contiguous highlight regions vs gaps
       const GAP_THRESHOLD = 0.02; // 2% of page height
       const rects = highlightRectsPerPage[pageNum];
-      
+
       // Sort rectangles by top position
       rects.sort((a, b) => a.top - b.top);
-      
+
       // Group contiguous highlights
       const highlightGroups = [];
       let currentGroup = null;
-      
+
       rects.forEach((rect) => {
         if (!currentGroup) {
           currentGroup = { top: rect.top, bottom: rect.bottom };
@@ -581,13 +804,13 @@ useEffect(() => {
       if (currentGroup) {
         highlightGroups.push(currentGroup);
       }
-      
+
       // Calculate the highlight region (top and bottom bounds of all groups)
       // But we'll use mask to exclude gaps between groups
       const highlightTop = b.minY;
       const highlightBottom = b.maxY;
       const highlightHeight = highlightBottom - highlightTop;
-      
+
       // Calculate crop progress based on highlight view crop zoom (separate from page scale)
       // At cropZoom 1.0: cropProgress = 0 (show full page)
       // At cropZoom 1.5: cropProgress = 0.5 (crop halfway)
@@ -597,27 +820,27 @@ useEffect(() => {
       const cropZoom = isHighlightView ? highlightViewCropZoom : 1.0;
       const normalizedScale = Math.max(minZoom, Math.min(cropZoom, maxZoom));
       const cropProgress = (normalizedScale - minZoom) / (maxZoom - minZoom);
-      
+
       // Calculate how much to crop from top and bottom
       // At cropProgress = 0: no crop (show full page)
       // At cropProgress = 1: crop to highlight bounds only
       const topCrop = highlightTop * cropProgress;
       const bottomCrop = (1 - highlightBottom) * cropProgress;
-      
+
       // Calculate final visible region (only height is cropped, width stays full)
       b.visibleTop = topCrop;
       b.visibleBottom = 1 - bottomCrop;
       b.visibleHeight = b.visibleBottom - b.visibleTop;
-      
+
       // Store highlight groups for mask generation
       b.highlightGroups = highlightGroups;
-      
+
       // For clip-path: we only crop top and bottom, left and right stay at 0% and 100%
       // But we'll also use mask-image to exclude gaps between highlight groups
       b.clipTop = b.visibleTop * 100;
       b.clipBottom = (1 - b.visibleBottom) * 100;
       b.cropProgress = cropProgress; // Store crop progress for spacing calculation
-      
+
       // Generate mask-image gradient that shows only highlight groups (excludes gaps)
       // Apply mask when there are multiple highlight groups (gaps between them) and we're cropping
       if (cropProgress > 0 && highlightGroups.length > 0) {
@@ -630,20 +853,20 @@ useEffect(() => {
           // At cropProgress = 1: show only highlights (gaps hidden)
           // Strategy: Gradually shrink gaps by making them transparent as crop progress increases
           const maskStops = [];
-          
+
           // Start from the top of the page
           let currentPos = 0;
-          
+
           highlightGroups.forEach((group) => {
             const groupTopPercent = group.top * 100;
             const groupBottomPercent = group.bottom * 100;
-            
+
             // Calculate gap before this group
             if (groupTopPercent > currentPos) {
               const gapStart = currentPos;
               const gapEnd = groupTopPercent;
               const gapSize = gapEnd - gapStart;
-              
+
               // Gradually hide the gap based on crop progress
               // At cropProgress=0: gap is fully visible (black = visible in mask)
               // At cropProgress=1: gap is fully hidden (transparent)
@@ -651,7 +874,7 @@ useEffect(() => {
               const visibleGapSize = gapSize * Math.max(0, 1 - cropProgress);
               const visibleGapStart = gapStart + (gapSize - visibleGapSize) / 2;
               const visibleGapEnd = visibleGapStart + visibleGapSize;
-              
+
               if (visibleGapSize > 0.01) {
                 // Gap is partially visible - show center portion, hide edges
                 maskStops.push(`transparent ${gapStart}%`);
@@ -666,14 +889,14 @@ useEffect(() => {
                 maskStops.push(`transparent ${gapEnd}%`);
               }
             }
-            
+
             // Add black (fully visible) region for this highlight group
             maskStops.push(`black ${groupTopPercent}%`);
             maskStops.push(`black ${groupBottomPercent}%`);
-            
+
             currentPos = groupBottomPercent;
           });
-          
+
           // Add transparent region after last group (if any)
           if (currentPos < 100) {
             const gapStart = currentPos;
@@ -682,7 +905,7 @@ useEffect(() => {
             const visibleGapSize = gapSize * Math.max(0, 1 - cropProgress);
             const visibleGapStart = gapStart + (gapSize - visibleGapSize) / 2;
             const visibleGapEnd = visibleGapStart + visibleGapSize;
-            
+
             if (visibleGapSize > 0.01) {
               // Gap is partially visible - show center portion, hide edges
               maskStops.push(`transparent ${gapStart}%`);
@@ -697,7 +920,7 @@ useEffect(() => {
               maskStops.push(`transparent ${gapEnd}%`);
             }
           }
-          
+
           // Apply mask to exclude gaps gradually
           b.maskImage = `linear-gradient(to bottom, ${maskStops.join(', ')})`;
           // Store mask strength based on crop progress
@@ -712,26 +935,48 @@ useEffect(() => {
         b.maskStrength = null;
       }
     });
-    
+
     // Calculate overall crop progress for spacing (average of all pages with highlights)
     const pagesWithHighlights = Object.values(bounds).filter(b => b.hasHighlights);
     const avgCropProgress = pagesWithHighlights.length > 0
       ? pagesWithHighlights.reduce((sum, b) => sum + (b.cropProgress || 0), 0) / pagesWithHighlights.length
       : 0;
-    
+
     return { bounds, avgCropProgress };
   }, [filteredAnnotations, isHighlightView, highlightViewCropZoom]);
 
   const liveFreehandStrokeWidth =
     drawingState?.type === 'freehand'
       ? (drawingState.brushSize || activeBrushSize || DEFAULT_BRUSH_SIZE) *
-        (drawingState.pressureEnabled ? (drawingState.pressure || 1) : 1)
+      (drawingState.pressureEnabled ? (drawingState.pressure || 1) : 1)
       : null;
 
   const liveFreehandOpacity =
     drawingState?.type === 'freehand'
       ? (typeof drawingState.opacity === 'number' ? drawingState.opacity : activeBrushOpacity || DEFAULT_BRUSH_OPACITY)
       : null;
+
+  // ---------- WORKSPACE EXPANSION ON NAV COLLAPSE ----------
+  const lastRightPanelCollapsedRef = useRef(isRightPanelCollapsed);
+
+  useEffect(() => {
+    // Only adjust slide if there's a real change in state
+    if (lastRightPanelCollapsedRef.current !== isRightPanelCollapsed) {
+      const diff = 600; // 300px - 64px from CSS
+
+      if (isRightPanelCollapsed) {
+        // Collapsing: Wait for nav to collapse, then move workspace left
+        const timeout = setTimeout(() => {
+          setWorkspaceSlide((prev) => Math.max(WORKSPACE_SLIDE_MIN, prev - diff));
+        }, 300); // Match CSS transition duration
+        return () => clearTimeout(timeout);
+      } else {
+        // Expanding: Move workspace right immediately to make room for nav
+        setWorkspaceSlide((prev) => Math.min(workspaceWidth, prev + diff));
+      }
+      lastRightPanelCollapsedRef.current = isRightPanelCollapsed;
+    }
+  }, [isRightPanelCollapsed, workspaceWidth]);
 
   const workspaceVisibleWidth = Math.max(workspaceWidth - workspaceSlide, 0);
   const documentRightPadding = workspaceVisibleWidth + WORKSPACE_RESIZER_WIDTH;
@@ -772,50 +1017,93 @@ useEffect(() => {
         window.alert('Unable to locate the selected content for this comment.');
         return false;
       }
-      const body = window.prompt('Add comment', quoteText ? `Selection: "${quoteText.substring(0, 80)}"...` : '');
-      if (!body || !body.trim()) {
-        return false;
-      }
-      const content = body.trim();
-      const createdAt = new Date().toISOString();
-      const newComment = {
-        id: `comment-${Date.now()}-${Math.floor(Math.random() * 10000)}`,
-        content,
-        quoteText,
-        pageNumber,
+      // Open modal instead of window.prompt
+      setCommentModalData({
         sourceRect,
+        pageNumber,
         sourceType,
-        color: activeColor,
-        createdAt,
-      };
-      setWorkspaceComments((prev) => [newComment, ...prev]);
-      setWorkspaceItems((prev) => {
-        const commentCount = prev.filter((it) => getWorkspaceItemType(it) === 'comment').length;
-        const baseY = 0.18 + ((commentCount * 0.14) % 0.6);
-        const leftOffset = clamp(
-          WORKSPACE_LEFT_STACK_X + (commentCount % 3) * (WORKSPACE_LEFT_STACK_SPREAD / 2) + Math.random() * 0.01,
-          0.02,
-          0.2,
-        );
-        const item = {
-          id: createWorkspaceItemId(),
-          type: 'comment',
-          sourceId: newComment.id,
-          x: leftOffset,
-          y: clamp(baseY, 0.05, 0.92),
-          createdAt,
-        };
-        return [item, ...prev];
+        quoteText,
+        createAnnotation,
       });
+      return true;
+    },
+    [],
+  );
+
+  // Handle comment modal submission
+  const handleCommentModalSubmit = useCallback(
+    async (commentText) => {
+      if (!commentModalData) return;
+
+      const { sourceRect, pageNumber, sourceType, quoteText, createAnnotation } = commentModalData;
+      const content = commentText.trim();
+      const createdAt = new Date().toISOString();
+
+      // Create either note annotation OR workspace comment (separate features)
       if (createAnnotation) {
+        // Create ONLY note annotation on PDF (no API for now)
         const annotationId = createAnnotationId();
         const position = {
           x: clamp(sourceRect.x + (sourceRect.width || 0) / 2, 0.05, 0.95),
           y: clamp(sourceRect.y + (sourceRect.height || 0) / 2, 0.05, 0.95),
         };
-        updateAnnotations((prev) => [
-          ...prev,
-          {
+        const annotation = {
+          id: annotationId,
+          type: 'comment',
+          pageNumber,
+          color: activeColor,
+          createdAt,
+          content,
+          linkedText: quoteText || null,
+          position,
+        };
+
+        updateAnnotations((prev) => [...prev, annotation]);
+        console.log('[Note] Created note annotation (not saved to API)');
+      } else {
+        // Create ONLY workspace comment (with API save)
+        const newComment = {
+          id: `comment-${Date.now()}-${Math.floor(Math.random() * 10000)}`,
+          content,
+          quoteText,
+          pageNumber,
+          sourceRect,
+          sourceType,
+          color: activeColor,
+          createdAt,
+        };
+
+        setWorkspaceComments((prev) => [newComment, ...prev]);
+        setWorkspaceItems((prev) => {
+          const commentCount = prev.filter((it) => getWorkspaceItemType(it) === 'comment').length;
+          const baseY = 0.18 + ((commentCount * 0.14) % 0.6);
+          const leftOffset = clamp(
+            WORKSPACE_LEFT_STACK_X + (commentCount % 3) * (WORKSPACE_LEFT_STACK_SPREAD / 2) + Math.random() * 0.01,
+            0.02,
+            0.2,
+          );
+          const item = {
+            id: createWorkspaceItemId(),
+            type: 'comment',
+            sourceId: newComment.id,
+            x: leftOffset,
+            y: clamp(baseY, 0.05, 0.92),
+            createdAt,
+          };
+          return [item, ...prev];
+        });
+
+        // Save workspace comment to API as a comment annotation
+        if (pdfId) {
+          const annotationId = createAnnotationId();
+          const position = {
+            x: clamp(sourceRect.x + (sourceRect.width || 0) / 2, 0.05, 0.95),
+            y: clamp(sourceRect.y + (sourceRect.height || 0) / 2, 0.05, 0.95),
+            width: sourceRect.width || 0.05,
+            height: sourceRect.height || 0.05,
+          };
+
+          const commentAnnotation = {
             id: annotationId,
             type: 'comment',
             pageNumber,
@@ -824,13 +1112,33 @@ useEffect(() => {
             content,
             linkedText: quoteText || null,
             position,
-          },
-        ]);
+          };
+
+          try {
+            const result = await saveAnnotation(commentAnnotation, pdfId);
+            if (result.success) {
+              console.log('[Comment] Successfully saved workspace comment to API');
+            } else {
+              console.error('[Comment] Failed to save workspace comment:', result.error);
+            }
+          } catch (error) {
+            console.error('[Comment] Error saving workspace comment:', error);
+          }
+        } else {
+          console.log('[Comment] Created workspace comment (no pdfId available)');
+        }
       }
-      return true;
+
+      // Close modal
+      setCommentModalData(null);
     },
-    [activeColor, setWorkspaceComments, setWorkspaceItems, updateAnnotations],
+    [commentModalData, activeColor, setWorkspaceComments, setWorkspaceItems, updateAnnotations, pdfId],
   );
+
+  // Handle comment modal cancel
+  const handleCommentModalCancel = useCallback(() => {
+    setCommentModalData(null);
+  }, []);
 
   const handleCreateCommentFromSelection = useCallback(() => {
     const stored = currentSelectionRef.current;
@@ -852,6 +1160,7 @@ useEffect(() => {
       pageNumber: pageNum,
       sourceType: 'text',
       quoteText: stored.text,
+      createAnnotation: false,  // Create workspace comment from text selection
     });
     if (created) {
       const sel = window.getSelection();
@@ -865,7 +1174,7 @@ useEffect(() => {
   const applyLineAnnotation = useCallback((type) => {
     const stored = currentSelectionRef.current;
     const hasSelection = !!stored.text && stored.range && stored.pageNumber;
-    
+
     // If we have a selection, use its page number; otherwise use primaryPage for click-based annotations
     const targetPage = hasSelection ? stored.pageNumber : primaryPage;
     const overlay = overlayRefs.current[targetPage];
@@ -967,12 +1276,12 @@ useEffect(() => {
   const finalizeDrawing = useCallback((endPoint, overlayKey) => {
     if (!drawingState) return;
     const { type, start, points, pageNumber, brushSize, pressure, mode, pressureEnabled, opacity } = drawingState;
-    
+
     // Handle clipping area selection
     if (type === 'clip') {
       const w = Math.abs(endPoint.x - start.x);
       const h = Math.abs(endPoint.y - start.y);
-      if (w < 0.01 || h < 0.01) { 
+      if (w < 0.01 || h < 0.01) {
         setDrawingState(null);
         return;
       }
@@ -987,7 +1296,7 @@ useEffect(() => {
       handleExtractClipFromArea(clipRect, pageNumber);
       return;
     }
-    
+
     if (!type || !['highlight', 'freehand'].includes(type)) {
       setDrawingState(null);
       return;
@@ -1016,7 +1325,7 @@ useEffect(() => {
         ...base,
         points: merged,
         strokeWidth,
-        brushSize: baseSize,
+        brushSize: strokeWidth,
         mode: mode || 'freehand',
         pressureFactor,
         pressureEnabled,
@@ -1128,11 +1437,11 @@ useEffect(() => {
       const point = getNormalizedPoint(event, overlay);
       const stored = currentSelectionRef.current;
       const hasSelection = !!stored.text && stored.range && stored.pageNumber;
-      
+
       // Use the page number from the selection if available, otherwise use the current overlay's page
       const targetPage = hasSelection && stored.pageNumber ? stored.pageNumber : pageNumber;
       const targetOverlay = hasSelection && stored.pageNumber ? overlayRefs.current[stored.pageNumber] : overlay;
-      
+
       let x, y, linkedText = '';
       if (hasSelection && targetOverlay) {
         const rect = stored.range.getClientRects()[0];
@@ -1149,24 +1458,23 @@ useEffect(() => {
         x = point.x;
         y = point.y;
       }
-      
-      const content = window.prompt('Add note', linkedText || '');
-      if (!content) return;
-      
-      updateAnnotations((prev) => [
-        ...prev,
-        {
-          id: createAnnotationId(),
-          type: 'comment',
-          pageNumber: targetPage,
-          color: activeColor,
-          createdAt: new Date().toISOString(),
-          content,
-          linkedText: linkedText || null,
-          position: { x: clamp(x, 0.05, 0.95), y: clamp(y, 0.05, 0.95) },
-        },
-      ]);
-      
+
+      // Use modal for comment input with API save
+      const sourceRect = {
+        x: clamp(x - 0.025, 0, 0.95),
+        y: clamp(y - 0.025, 0, 0.95),
+        width: 0.05,
+        height: 0.05,
+      };
+
+      handleCreateWorkspaceComment({
+        sourceRect,
+        pageNumber: targetPage,
+        sourceType: hasSelection ? 'text' : 'point',
+        quoteText: linkedText,
+        createAnnotation: true,  // Enable API save for comment tool
+      });
+
       // Clear selection
       currentSelectionRef.current = { text: '', range: null, pageNumber: null };
       window.getSelection()?.removeAllRanges();
@@ -1177,7 +1485,7 @@ useEffect(() => {
 
   const handlePointerMove = useCallback((event, overlayKey, pageNumber) => {
     const overlay = overlayRefs.current[overlayKey] || overlayRefs.current[pageNumber];
-    
+
     // dragging comment note - handle globally for smooth dragging
     if (draggingAnnotationId.current) {
       event.preventDefault();
@@ -1224,12 +1532,12 @@ useEffect(() => {
           prev.map(bm =>
             bm.id === draggingBookmarkId.current
               ? {
-                  ...bm,
-                  position: {
-                    x: clamp(p.x - offsetX, 0.05, 0.95),
-                    y: clamp(p.y - offsetY, 0.05, 0.95),
-                  },
-                }
+                ...bm,
+                position: {
+                  x: clamp(p.x - offsetX, 0.05, 0.95),
+                  y: clamp(p.y - offsetY, 0.05, 0.95),
+                },
+              }
               : bm
           )
         );
@@ -1241,12 +1549,12 @@ useEffect(() => {
         prev.map(bm =>
           bm.id === draggingBookmarkId.current
             ? {
-                ...bm,
-                position: {
-                  x: clamp(p.x - offsetX, 0.05, 0.95),
-                  y: clamp(p.y - offsetY, 0.05, 0.95),
-                },
-              }
+              ...bm,
+              position: {
+                x: clamp(p.x - offsetX, 0.05, 0.95),
+                y: clamp(p.y - offsetY, 0.05, 0.95),
+              },
+            }
             : bm
         )
       );
@@ -1289,7 +1597,7 @@ useEffect(() => {
 
   const handlePointerUp = useCallback((event, overlayKey, pageNumber) => {
     const overlay = overlayRefs.current[overlayKey] || overlayRefs.current[pageNumber];
-    
+
     // Release pointer capture
     if (event.target && event.target.releasePointerCapture) {
       try {
@@ -1299,13 +1607,13 @@ useEffect(() => {
       }
     }
 
-    if (draggingAnnotationId.current) { 
-      draggingAnnotationId.current = null; 
-      return; 
+    if (draggingAnnotationId.current) {
+      draggingAnnotationId.current = null;
+      return;
     }
-    if (draggingBookmarkId.current) { 
-      draggingBookmarkId.current = null; 
-      return; 
+    if (draggingBookmarkId.current) {
+      draggingBookmarkId.current = null;
+      return;
     }
 
     if (!overlay) {
@@ -1326,9 +1634,9 @@ useEffect(() => {
     }
 
     // Check if this is the page we're drawing on
-    if (!drawingState || (drawingState.pageNumber !== pageNumber && drawingState.overlayKey !== overlayKey)) { 
-      setDrawingState(null); 
-      return; 
+    if (!drawingState || (drawingState.pageNumber !== pageNumber && drawingState.overlayKey !== overlayKey)) {
+      setDrawingState(null);
+      return;
     }
 
     finalizeDrawing(getNormalizedPoint(event, overlay), overlayKey);
@@ -1377,7 +1685,7 @@ useEffect(() => {
     const sel = window.getSelection();
     const raw = sel?.toString() ?? '';
     const text = normalizeClippingText(raw);
-    
+
     // If no text selected, show alert
     if (!text) {
       window.alert('Select text to clip, or use the Clip Area tool for scanned documents.');
@@ -1392,7 +1700,7 @@ useEffect(() => {
 
     const pageNum = stored.pageNumber;
     const overlay = overlayRefs.current[pageNum];
-    
+
     // compute source rect normalized relative to overlay (if range exists)
     let sourceRect = null;
     if (overlay) {
@@ -1415,6 +1723,7 @@ useEffect(() => {
       sourcePage: pageNum,
       sourceRect, // may be null if selection couldn't be measured
       source: 'PDF',
+      type: 'clipping',
     };
 
     setClippings((prev) => [newClip, ...prev]);
@@ -1441,31 +1750,35 @@ useEffect(() => {
     });
   }, []);
 
-  const handleCombineClippings = useCallback(() => {
+  const handleCombineClippings = useCallback(async () => {
     if (selectedClippings.length < 2) return;
-    let newCombinedClipId = null;
-    setClippings((prev) => {
-      const selected = prev.filter(c => selectedClippings.includes(c.id));
-      if (selected.length < 2) return prev;
-      const segments = selected.map((clip, idx) => ({
-        id: clip.id,
-        label: `Segment ${idx + 1}`,
-        content: clip.content,
-        sourcePage: clip.sourcePage,
-        sourceRect: clip.sourceRect,
-      }));
-      const combined = {
-        id: createClippingId(),
-        content: segments.map(seg => `${seg.label}: ${seg.content}`).join('\n'),
-        createdAt: new Date().toISOString(),
-        sourcePage: segments.map(seg => seg.sourcePage).join(', '),
-        sourceRect: segments[0]?.sourceRect || null,
-        segments,
-        type: 'combined',
-      };
-      newCombinedClipId = combined.id;
-      return [combined, ...prev.filter(c => !selectedClippings.includes(c.id))];
-    });
+
+    // 1. Find the clippings to combine
+    const selected = clippings.filter(c => selectedClippings.includes(c.id));
+    if (selected.length < 2) return;
+
+    // 2. Create the combined clipping object
+    const segments = selected.map((clip, idx) => ({
+      id: clip.id,
+      label: `Segment ${idx + 1}`,
+      content: clip.content,
+      sourcePage: clip.sourcePage,
+      sourceRect: clip.sourceRect,
+    }));
+
+    const combined = {
+      id: createClippingId(),
+      content: segments.map(seg => `${seg.label}: ${seg.content}`).join('\n'),
+      createdAt: new Date().toISOString(),
+      sourcePage: segments.map(seg => seg.sourcePage).join(', '),
+      sourceRect: segments[0]?.sourceRect || null,
+      segments,
+      type: 'combined',
+    };
+
+    // 3. Update local state
+    setClippings((prev) => [combined, ...prev.filter(c => !selectedClippings.includes(c.id))]);
+
     setWorkspaceItems(prev => {
       // Remove originals
       const filtered = prev.filter(
@@ -1477,7 +1790,8 @@ useEffect(() => {
       const hadOriginalsInWorkspace = prev.some(
         (it) => getWorkspaceItemType(it) === 'clip' && selectedClippings.includes(getWorkspaceItemSourceId(it))
       );
-      if (newCombinedClipId && hadOriginalsInWorkspace) {
+
+      if (hadOriginalsInWorkspace) {
         const clipCount = filtered.filter((it) => getWorkspaceItemType(it) === 'clip').length;
         const leftOffset = clamp(
           WORKSPACE_LEFT_STACK_X + (clipCount % 4) * (WORKSPACE_LEFT_STACK_SPREAD / 2) + Math.random() * 0.01,
@@ -1489,7 +1803,7 @@ useEffect(() => {
         const newItem = {
           id: createWorkspaceItemId(),
           type: 'clip',
-          sourceId: newCombinedClipId,
+          sourceId: combined.id,
           x: leftOffset,
           y: pointerY,
           createdAt,
@@ -1498,8 +1812,24 @@ useEffect(() => {
       }
       return filtered;
     });
+
     setSelectedClippings([]);
-  }, [selectedClippings]);
+
+    // 4. Immediate API Save
+    if (pdfId) {
+      console.log(`[Workspace] Immediate save for combined clip ${combined.id}`);
+      try {
+        const result = await saveAnnotation({ ...combined, type: 'clipping' }, pdfId);
+        if (result.success) {
+          setSavedAnnotationIds(prev => new Set([...prev, combined.id]));
+        } else {
+          console.error('[Workspace] Failed to save combined clip:', result.error);
+        }
+      } catch (error) {
+        console.error('[Workspace] Error saving combined clip:', error);
+      }
+    }
+  }, [selectedClippings, clippings, pdfId, setSavedAnnotationIds]);
 
   const handleUncombineClipping = useCallback((clipId) => {
     const combinedClip = clippings.find((c) => c.id === clipId && c.type === 'combined');
@@ -1690,7 +2020,7 @@ useEffect(() => {
         // Build searchable text string
         const ocrFullText = charIndex.map(c => c.char).join('');
         const lowerOcrText = ocrFullText.toLowerCase();
-        
+
         if (lowerOcrText) {
           let searchIndex = 0;
           while (searchIndex <= lowerOcrText.length - normalizedTerm.length) {
@@ -1700,7 +2030,7 @@ useEffect(() => {
 
             // Group characters by word for more accurate bounding box calculation
             const wordGroups = new Map();
-            
+
             for (let i = foundIndex; i < matchEnd; i++) {
               if (i >= charIndex.length) break;
               const charInfo = charIndex[i];
@@ -1723,12 +2053,12 @@ useEffect(() => {
               const { word, charIndices } = group;
               const { bbox } = word;
               const wordText = word.text || '';
-              
+
               if (!wordText || wordText.length === 0 || !bbox) return;
 
               // Filter out space characters (charIndex === -1)
               const validCharIndices = charIndices.filter(idx => idx >= 0);
-              
+
               if (validCharIndices.length === 0) {
                 // Only spaces - skip or use minimal width
                 return;
@@ -1769,7 +2099,7 @@ useEffect(() => {
 
               for (let i = 1; i < rects.length; i++) {
                 const rect = rects[i];
-                
+
                 // Check if rects are on the same line (similar y position)
                 const yDiff = Math.abs(rect.y - currentRect.y);
                 const isSameLine = yDiff < 0.01;
@@ -2037,7 +2367,7 @@ useEffect(() => {
       root.removeEventListener('dragover', handleDragOver);
       root.removeEventListener('drop', handleDrop);
     };
-}, [clippings, primaryPage, addClipToWorkspace]);
+  }, [clippings, primaryPage, addClipToWorkspace]);
 
   // remove workspace items whose clips no longer exist
   useEffect(() => {
@@ -2091,17 +2421,17 @@ useEffect(() => {
   const isPageVisible = useCallback((pageNumber) => {
     const scrollContainer = viewerZoomWrapperRef.current;
     if (!scrollContainer) return false;
-    
+
     const pageEl = pageRefs.current[pageNumber];
     if (!pageEl) return false;
-    
+
     const containerRect = scrollContainer.getBoundingClientRect();
     const pageRect = pageEl.getBoundingClientRect();
     const containerBottom = containerRect.bottom;
     const containerTop = containerRect.top;
     const pageBottom = pageRect.bottom;
     const pageTop = pageRect.top;
-    
+
     // Page is visible if it intersects with viewport (no buffer - disappear immediately when out of view)
     return (pageBottom >= containerTop) && (pageTop <= containerBottom);
   }, []);
@@ -2121,28 +2451,28 @@ useEffect(() => {
     // Helper to find the page element and calculate connector position
     const buildConnectorForPage = (sourceRect, pageNumber) => {
       if (!sourceRect || !pageNumber) return null;
-      
+
       // Only show connector if the page is visible in the viewport
       if (!isPageVisible(pageNumber)) return null;
-      
+
       // Find the page element for this page
       const pageEl = pageRefs.current[pageNumber];
       if (!pageEl) return null;
-      
+
       const pageRect = pageEl.getBoundingClientRect();
       const scrollContainer = viewerZoomWrapperRef.current;
       if (!scrollContainer) return null;
-      
+
       // Calculate source position within the page (normalized to page dimensions)
       let sx = sourceRect.x + (sourceRect.width || 0) / 2;
       let sy = sourceRect.y + (sourceRect.height || 0) / 2;
-      
+
       // Convert normalized coordinates to absolute position relative to deck
       // fromX: relative to document pane (left edge)
       // fromY: relative to deck top (using getBoundingClientRect which gives viewport coordinates)
       const fromX = pageRect.left - deckRect.left + sx * pageRect.width;
       const fromY = pageRect.top - deckRect.top + sy * pageRect.height;
-      
+
       return {
         from: {
           x: fromX,
@@ -2173,23 +2503,33 @@ useEffect(() => {
     // Single clip - connect to its source page (only if visible)
     if (itemType === 'clip' && source) {
       const pageNum = getPrimaryPageFromSource(source.sourcePage);
+      // Fallback: if sourceRect is missing (e.g. from flat API), try to construct it or assume it's valid if we just fixed the API transform
+      if (!source.sourceRect && source.source_rect_x !== undefined) {
+        source.sourceRect = {
+          x: parseFloat(source.source_rect_x),
+          y: parseFloat(source.source_rect_y),
+          width: parseFloat(source.source_rect_width),
+          height: parseFloat(source.source_rect_height),
+        };
+      }
       const single = buildConnectorForPage(source.sourceRect, pageNum);
       return single ? [single] : [];
     }
-    
+
     return [];
-  }, [pagePositions, isPageVisible]);
+    return [];
+  }, [pagePositions, isPageVisible, layoutVersion, workspaceWidth, workspaceSlide]);
 
   // when clicking workspace item: jump to source page and pulse highlight
   const handleWorkspaceItemClick = useCallback((item) => {
     const itemType = getWorkspaceItemType(item);
     const sourceId = getWorkspaceItemSourceId(item);
-    
+
     if (itemType === 'comment') {
       const comment = workspaceComments.find((c) => c.id === sourceId);
       if (!comment) return;
       setPrimaryPage(comment.pageNumber);
-      
+
       // Scroll to the page
       setTimeout(() => {
         const pageEl = pageRefs.current[comment.pageNumber];
@@ -2204,7 +2544,7 @@ useEffect(() => {
           });
         }
       }, 100);
-      
+
       const highlightRect = comment.sourceRect;
       if (highlightRect) {
         pulseTemporaryHighlight({
@@ -2215,17 +2555,17 @@ useEffect(() => {
       }
       return;
     }
-    
+
     const clip = clippings.find(c => c.id === sourceId);
     if (!clip) return;
-    
+
     // For clips, jump to the first segment or main source page (not filtered by primaryPage)
     const targetSegment = clip.segments?.[0];
     const targetPage = targetSegment ? getPrimaryPageFromSource(targetSegment.sourcePage) : (clip.sourcePage || getPrimaryPageFromSource(clip.sourcePage));
-    
+
     if (targetPage) {
       setPrimaryPage(targetPage);
-      
+
       // Scroll to the page
       setTimeout(() => {
         const pageEl = pageRefs.current[targetPage];
@@ -2241,7 +2581,7 @@ useEffect(() => {
         }
       }, 100);
     }
-    
+
     const highlightRect = targetSegment?.sourceRect || clip.sourceRect;
     if (highlightRect && targetPage) {
       pulseTemporaryHighlight({
@@ -2287,7 +2627,7 @@ useEffect(() => {
     if (!scrollContainer) return;
     const containerRect = scrollContainer.getBoundingClientRect();
     const scrollTop = scrollContainer.scrollTop;
-    
+
     Object.keys(pageRefs.current).forEach((pageNumStr) => {
       const pageEl = pageRefs.current[pageNumStr];
       if (!pageEl) return;
@@ -2349,7 +2689,7 @@ useEffect(() => {
         ev.preventDefault();
         const delta = -ev.deltaY;
         const step = delta > 0 ? 0.05 : -0.05;
-        
+
         if (isHighlightView) {
           // In highlight view: control crop zoom, not page scale
           setHighlightViewCropZoom(prev => clamp(+(prev + step).toFixed(2), 1.0, 2.5));
@@ -2381,12 +2721,12 @@ useEffect(() => {
     const onPointerUp = (ev) => {
       if (isPointerDownPan) {
         isPointerDownPan = false;
-        try { wrapper.releasePointerCapture?.(ev.pointerId); } catch {}
+        try { wrapper.releasePointerCapture?.(ev.pointerId); } catch { }
       }
     };
 
     wrapper.addEventListener('wheel', onWheel, { passive: false });
-    
+
     return () => {
       wrapper.removeEventListener('wheel', onWheel);
       wrapper.removeEventListener('pointerdown', onPointerDown);
@@ -2529,7 +2869,7 @@ useEffect(() => {
     window.addEventListener('pointermove', handleGlobalPointerMove);
     window.addEventListener('pointerup', handleGlobalPointerUp);
     window.addEventListener('pointercancel', handleGlobalPointerUp);
-    
+
     return () => {
       window.removeEventListener('pointermove', handleGlobalPointerMove);
       window.removeEventListener('pointerup', handleGlobalPointerUp);
@@ -2795,6 +3135,11 @@ useEffect(() => {
     workspace: workspaceApi,
     document: documentApi,
     connectors: connectorsApi,
+    commentModal: {
+      data: commentModalData,
+      onSubmit: handleCommentModalSubmit,
+      onCancel: handleCommentModalCancel,
+    },
   };
 };
 
