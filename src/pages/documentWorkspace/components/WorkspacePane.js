@@ -35,9 +35,9 @@ const WorkspacePane = ({
   activeBrushOpacity,
   freehandMode,
   isPressureEnabled,
-   eraserToolId = WORKSPACE_ERASER_TOOL_ID,
-   selectedClipIds = [],
-   onToggleClipSelection,
+  eraserToolId = WORKSPACE_ERASER_TOOL_ID,
+  selectedClipIds = [],
+  onToggleClipSelection,
 }) => {
   const draggingWorkspaceItemId = draggingWorkspaceItemIdRef?.current;
   const pointerMetaRef = useRef({});
@@ -99,16 +99,15 @@ const WorkspacePane = ({
               itemType === 'comment' ? workspaceComments.find((c) => c.id === sourceId) : null;
             if (itemType === 'clip' && !clip) return null;
             if (itemType === 'comment' && !comment) return null;
-             const isDragging = draggingWorkspaceItemId === item.id;
-             const isClipSelected =
-               itemType === 'clip' && clip && selectedClipIds?.includes(clip.id);
+            const isDragging = draggingWorkspaceItemId === item.id;
+            const isClipSelected =
+              itemType === 'clip' && clip && selectedClipIds?.includes(clip.id);
             return (
               <div
                 key={item.id}
-                 className={`${styles.workspaceItem} ${isDragging ? styles.dragging : ''} ${
-                   isClipSelected ? styles.workspaceItemSelected : ''
-                 }`}
-                 data-workspace-clip={itemType === 'clip' && clip ? clip.id : undefined}
+                className={`${styles.workspaceItem} ${isDragging ? styles.dragging : ''} ${isClipSelected ? styles.workspaceItemSelected : ''
+                  }`}
+                data-workspace-clip={itemType === 'clip' && clip ? clip.id : undefined}
                 style={{
                   left: `${item.x * 100}%`,
                   top: `${item.y * 100}%`,
@@ -117,47 +116,47 @@ const WorkspacePane = ({
                   boxShadow: isDragging
                     ? '0 20px 40px rgba(0,0,0,0.2)'
                     : '0 4px 12px rgba(0,0,0,0.1)',
-                 }}
-                 onPointerDown={(ev) => {
-                   startMoveWorkspaceItem(ev, item);
-                   if (itemType === 'clip' && clip) {
-                     pointerMetaRef.current[item.id] = {
-                       x: ev.clientX,
-                       y: ev.clientY,
-                       time: ev.timeStamp,
-                     };
-                   }
-                 }}
-                 onClick={(ev) => {
-                   const meta = pointerMetaRef.current[item.id];
-                   pointerMetaRef.current[item.id] = undefined;
+                }}
+                onPointerDown={(ev) => {
+                  startMoveWorkspaceItem(ev, item);
+                  if (itemType === 'clip' && clip) {
+                    pointerMetaRef.current[item.id] = {
+                      x: ev.clientX,
+                      y: ev.clientY,
+                      time: ev.timeStamp,
+                    };
+                  }
+                }}
+                onClick={(ev) => {
+                  const meta = pointerMetaRef.current[item.id];
+                  pointerMetaRef.current[item.id] = undefined;
 
-                   if (itemType === 'clip' && clip) {
-                     // Ignore double-clicks; those are handled separately
-                     if (ev.detail && ev.detail > 1) {
-                       return;
-                     }
-                     if (meta) {
-                       const duration = ev.timeStamp - meta.time;
-                       const distance = Math.hypot(ev.clientX - meta.x, ev.clientY - meta.y);
-                       // Treat as a "click to select" only if it was quick and not dragged
-                       if (duration <= 250 && distance <= 4) {
-                         ev.preventDefault();
-                         ev.stopPropagation();
-                         onToggleClipSelection?.(clip.id);
-                         return;
-                       }
-                     }
-                   }
+                  if (itemType === 'clip' && clip) {
+                    // Ignore double-clicks; those are handled separately
+                    if (ev.detail && ev.detail > 1) {
+                      return;
+                    }
+                    if (meta) {
+                      const duration = ev.timeStamp - meta.time;
+                      const distance = Math.hypot(ev.clientX - meta.x, ev.clientY - meta.y);
+                      // Treat as a "click to select" only if it was quick and not dragged
+                      if (duration <= 250 && distance <= 4) {
+                        ev.preventDefault();
+                        ev.stopPropagation();
+                        onToggleClipSelection?.(clip.id);
+                        return;
+                      }
+                    }
+                  }
 
-                   // Fallback: regular click behaviour (jump to source for comments / clips)
-                   handleWorkspaceItemClick(item);
-                 }}
-                 onDoubleClick={(ev) => {
-                   ev.preventDefault();
-                   ev.stopPropagation();
-                   handleWorkspaceItemClick(item);
-                 }}
+                  // Fallback: regular click behaviour (jump to source for comments / clips)
+                  handleWorkspaceItemClick(item);
+                }}
+                onDoubleClick={(ev) => {
+                  ev.preventDefault();
+                  ev.stopPropagation();
+                  handleWorkspaceItemClick(item);
+                }}
               >
                 {itemType === 'clip' && (
                   <div className={styles.workspaceClipCard}>

@@ -56,3 +56,10 @@ export const WORKSPACE_SLIDE_MAX = WORKSPACE_FIXED_WIDTH_PX;
 export const WORKSPACE_LEFT_STACK_X = 0.08;
 export const WORKSPACE_LEFT_STACK_SPREAD = 0.04;
 
+// API endpoints
+export const API_ENDPOINTS = {
+  GET_ANNOTATIONS: 'user/pdf-anotaion?action=get-annotations',
+  STORE_ANNOTATIONS: 'user/pdf-anotaion?action=store-anotation',
+  UPDATE_ANNOTATIONS: 'user/pdf-anotaion?action=update-annotation'
+};
+
