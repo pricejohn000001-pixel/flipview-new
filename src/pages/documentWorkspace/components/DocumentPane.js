@@ -9,7 +9,7 @@ import {
   WORKSPACE_ERASER_TOOL_ID,
   WORKSPACE_RESIZER_WIDTH,
 } from '../constants';
-import { useDocumentApi } from '../context/DocumentWorkspaceContext';
+import { useDocumentApi, useClippingsApi, useWorkspaceApi } from '../context/DocumentWorkspaceContext';
 import OcrTextLayer from './OcrTextLayer';
 
 const drawingTools = ['highlight', 'freehand', 'bookmark', 'clip', 'comment', WORKSPACE_ERASER_TOOL_ID];
@@ -39,11 +39,49 @@ const DocumentPane = () => {
     isHighlightView,
     highlightBoundsPerPage,
     isPdfOutOfViewport,
+    handleAnnotationClick, // Destructure new handler
   } = useDocumentApi();
 
+  const { items: clippings } = useClippingsApi();
+  const { comments: workspaceComments } = useWorkspaceApi();
+
   const annotationsToRender = useMemo(
-    () => [...filteredAnnotations, ...searchHighlights],
-    [filteredAnnotations, searchHighlights],
+    () => {
+      // Map clippings to highlight annotations
+      const clippingHighlights = clippings
+        .filter(c => c.sourceRect && c.sourcePage)
+        .map(c => ({
+          id: `clip-highlight-${c.id}`,
+          type: 'highlight',
+          pageNumber: c.sourcePage,
+          color: c.color || '#fbbf24', // Fallback color
+          // Use multi-rects if available, otherwise single valid position
+          ...(c.sourceRects && c.sourceRects.length > 0
+            ? { rects: c.sourceRects }
+            : { position: c.sourceRect }),
+          isSearchHighlight: false,
+          opacity: 0.3, // Consistent opacity
+        }));
+
+      // Map workspace comments to highlight annotations
+      const commentHighlights = workspaceComments
+        .filter(c => c.sourceRect && c.pageNumber)
+        .map(c => ({
+          id: `comment-highlight-${c.id}`,
+          type: 'highlight',
+          pageNumber: c.pageNumber,
+          color: c.color || '#facc15', // Fallback color
+          // Use multi-rects if available
+          ...(c.sourceRects && c.sourceRects.length > 0
+            ? { rects: c.sourceRects }
+            : { position: c.sourceRect }),
+          isSearchHighlight: false,
+          opacity: 0.3,
+        }));
+
+      return [...filteredAnnotations, ...searchHighlights, ...clippingHighlights, ...commentHighlights];
+    },
+    [filteredAnnotations, searchHighlights, clippings, workspaceComments],
   );
 
   // Local state for PDF document to access page metadata
@@ -290,6 +328,13 @@ const DocumentPane = () => {
                                     height={`${rect.height * 100}%`}
                                     fill={annotation.color}
                                     opacity={annotation.isSearchHighlight ? 0.95 : 0.3}
+                                    style={{ pointerEvents: 'visiblePainted', cursor: 'pointer' }}
+                                    onClick={(e) => {
+                                      if (activeTool === 'select') {
+                                        // e.stopPropagation(); // Optional: stop propergation if needed
+                                        handleAnnotationClick && handleAnnotationClick(annotation);
+                                      }
+                                    }}
                                   />
                                 ));
                               }
@@ -308,6 +353,12 @@ const DocumentPane = () => {
                                     height={`${height * 100}%`}
                                     fill={annotation.color}
                                     opacity={annotation.isSearchHighlight ? 0.95 : 1}
+                                    style={{ pointerEvents: 'visiblePainted', cursor: 'pointer' }}
+                                    onClick={(e) => {
+                                      if (activeTool === 'select') {
+                                        handleAnnotationClick && handleAnnotationClick(annotation);
+                                      }
+                                    }}
                                   />
                                 );
                               }

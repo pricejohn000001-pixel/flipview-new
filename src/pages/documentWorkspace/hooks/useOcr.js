@@ -124,7 +124,7 @@ const useOcr = ({ pdfProxyRef }) => {
 
       const { data } = await worker.recognize(
         canvas.toDataURL('image/png'),
-        { 
+        {
           tessedit_pageseg_mode: '1',
           preserve_interword_spaces: '1'
         },
@@ -278,6 +278,120 @@ const useOcr = ({ pdfProxyRef }) => {
 
   const extractTextFromArea = useCallback(async (clipRect, pageNumber) => {
     if (!clipRect || !pageNumber) return null;
+
+    // Attempt native text extraction first
+    try {
+      const hasText = await hasRealTextLayer(pageNumber);
+      if (hasText) {
+        const page = await pdfProxyRef.current.getPage(pageNumber);
+        const viewport = page.getViewport({ scale: 1 });
+        const content = await page.getTextContent();
+        const { width, height } = viewport;
+
+        // Clip rect is normalized (0-1). Convert to PDF coords.
+        // PDF coords: x0 at left, y0 at bottom (usually), but viewport handles this.
+        // Actually, viewport.convertToViewportPoint handles the transform.
+        // But content.items.transform gives raw PDF coords.
+        // Let's use the viewport to get pixel coords for items and compare to clipRect.
+
+        const rectX = clipRect.x * width;
+        const rectY = clipRect.y * height;
+        const rectW = clipRect.width * width;
+        const rectH = clipRect.height * height;
+        const rectRight = rectX + rectW;
+        const rectBottom = rectY + rectH;
+
+        const items = content.items.map(item => {
+          // transform is [scaleX, skewY, skewX, scaleY, tx, ty]
+          // ty is from bottom.
+          // Let's use standard rect logic
+          const tx = item.transform[4];
+          const ty = item.transform[5];
+
+          // PDF coordinate system (y grows up) vs canvas/viewport (y grows down)
+          // We need to normalize or use viewport.
+          // Viewport transform: [scale, 0, 0, -scale, 0, height]
+          // The item.transform is in PDF user space.
+          // Let's project to viewport manually or use viewport.
+
+          // Actually, let's just use raw values if possible, but Y is flipped.
+          // Simpler: Use the generic text extraction logic but filter by bbox.
+          // We can approximate bbox from transform and width/height.
+          // Or just trust layout?
+
+          // Better approach:
+          // 1. Get all text items
+          // 2. Filter items whose bounding box (in viewport space) intersects clipRect
+
+          // Using PDF.js helper to get rect? No exposed helper easily.
+          // Rough calculation:
+          // x = tx
+          // y = viewport.height - ty (approx, if scale is 1)
+
+          // Let's use the detailed logic from extractPdfTextLayer but filtering:
+
+          // Actually, to be safe and accurate with layout, we should just check if the center of the item is in the rect.
+          // Or overlap.
+
+          // Refined:
+          // Convert PDF point (tx, ty) to viewport point.
+          const [vx, vy] = viewport.convertToViewportPoint(tx, ty);
+          // viewport point y is from top.
+          // item.height is the font size roughly.
+
+          return {
+            str: item.str,
+            x: vx,
+            y: vy - item.height, // localized approximate top
+            w: item.width,
+            h: item.height,
+            hasEOL: item.hasEOL
+          };
+        });
+
+        // Filter items within rect
+        const inside = items.filter(i => {
+          // Check if center or significant portion is inside
+          const cx = i.x + i.w / 2;
+          const cy = i.y + i.h / 2;
+          return cx >= rectX && cx <= rectRight && cy >= rectY && cy <= rectBottom;
+        });
+
+        if (inside.length > 0) {
+          // Sort by Y (lines), then X (position in line)
+          inside.sort((a, b) => {
+            const dy = Math.abs(a.y - b.y);
+            if (dy < (a.h || 10) * 0.5) { // Same line threshold
+              return a.x - b.x;
+            }
+            return a.y - b.y;
+          });
+
+          // Join text
+          let text = '';
+          let lastY = inside[0].y;
+
+          inside.forEach((item, idx) => {
+            if (idx > 0) {
+              const dy = item.y - lastY;
+              if (dy > item.h * 1.5) {
+                text += '\n'; // New paragraph/line
+              } else {
+                text += ' ';
+              }
+            }
+            text += item.str;
+            lastY = item.y;
+          });
+
+          return { text: text.trim(), confidence: 100 };
+        }
+      }
+    } catch (e) {
+      console.warn('Native text extraction failed, falling back to OCR', e);
+    }
+
+    // Fallback to OCR implementation
     setIsClippingOcrRunning(true);
     try {
       const workers = await ensureWorkers();
@@ -306,7 +420,7 @@ const useOcr = ({ pdfProxyRef }) => {
     } finally {
       setIsClippingOcrRunning(false);
     }
-  }, [ensureWorkers, renderPageToCanvas]);
+  }, [ensureWorkers, renderPageToCanvas, hasRealTextLayer, pdfProxyRef]);
 
   // -------------------- CLEANUP --------------------
   useEffect(() => {

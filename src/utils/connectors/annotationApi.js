@@ -69,6 +69,13 @@ const transformAnnotationForAPI = (annotation, pdfId) => {
 
         case 'comment': {
             const position = annotation.position || { x: 0.5, y: 0.5, width: 0.05, height: 0.05 };
+            const sourceRects = (annotation.sourceRects || []).map(rect => ({
+                x: rect.x,
+                y: rect.y,
+                width: rect.width,
+                height: rect.height,
+            }));
+
             return {
                 ...basePayload,
                 content: annotation.content || '',
@@ -77,6 +84,10 @@ const transformAnnotationForAPI = (annotation, pdfId) => {
                 position_y: position.y,
                 position_width: position.width || 0.05,
                 position_height: position.height || 0.05,
+                // Send rects at top level (standard field) for backend compatibility
+                rects: sourceRects,
+                // Also keep source_rects just in case, but rects is primary for highlights
+                source_rects: sourceRects,
             };
         }
 
@@ -99,6 +110,7 @@ const transformAnnotationForAPI = (annotation, pdfId) => {
                         content: annotation.content || 'Combined clipping', // Ensure this is not empty
                         source_page: sourcePageInt,
                         source: annotation.source || 'PDF', // Default to PDF for combined
+                        // Combined clips usually aggregate segments, but we could add source_rects if relevant.
                     },
                     segments: annotation.segments.map((seg, idx) => ({
                         segment_clipping_id: seg.segmentClippingId ?? seg.id ?? seg.segment_clipping_id,
@@ -110,9 +122,18 @@ const transformAnnotationForAPI = (annotation, pdfId) => {
             } else {
                 // For individual clippings
                 const rect = annotation.sourceRect || { x: 0, y: 0, width: 0, height: 0 };
+                const sourceRects = (annotation.sourceRects || []).map(r => ({
+                    x: r.x,
+                    y: r.y,
+                    width: r.width,
+                    height: r.height,
+                }));
+
                 return {
                     ...basePayload,
                     type: 'clipping',
+                    // Send rects at top level (standard field) for backend compatibility
+                    rects: sourceRects,
                     clipping: {
                         content: annotation.content || '',
                         source_page: sourcePageInt,
@@ -123,6 +144,8 @@ const transformAnnotationForAPI = (annotation, pdfId) => {
                         source: annotation.source || 'OCR',
                         confidence: annotation.confidence ?? 0.88,
                         type: 'text',
+                        // Also keep source_rects just in case
+                        source_rects: sourceRects,
                     },
                 };
             }
@@ -242,6 +265,7 @@ const transformAnnotationFromAPI = (apiAnnotation) => {
         }
 
         case 'comment': {
+            const apiSourceRects = apiAnnotation.source_rects || apiAnnotation.rects || []; // Fallback to toplevel rects
             return {
                 ...baseAnnotation,
                 content: apiAnnotation.content || '',
@@ -252,6 +276,13 @@ const transformAnnotationFromAPI = (apiAnnotation) => {
                     width: parseFloat(apiAnnotation.position_width) || 0.05,
                     height: parseFloat(apiAnnotation.position_height) || 0.05,
                 },
+                // Map source_rects from API if available
+                sourceRects: apiSourceRects.map(r => ({
+                    x: parseFloat(r.x) || 0,
+                    y: parseFloat(r.y) || 0,
+                    width: parseFloat(r.width) || 0,
+                    height: parseFloat(r.height) || 0,
+                })),
             };
         }
 
@@ -282,6 +313,10 @@ const transformAnnotationFromAPI = (apiAnnotation) => {
                     };
                 });
                 const isCombined = segments.length > 0;
+
+                // Fallback to apiAnnotation.rects if source_rects not in clipping object
+                const apiSourceRects = c.source_rects || apiAnnotation.rects || [];
+
                 return {
                     id: apiAnnotation.id || `clipping-${Date.now()}`,
                     type: isCombined ? 'combined' : 'clipping',
@@ -294,6 +329,13 @@ const transformAnnotationFromAPI = (apiAnnotation) => {
                         width: parseFloat(c.source_rect_width) || 0,
                         height: parseFloat(c.source_rect_height) || 0,
                     },
+                    // Map source_rects from API if available
+                    sourceRects: apiSourceRects.map(r => ({
+                        x: parseFloat(r.x) || 0,
+                        y: parseFloat(r.y) || 0,
+                        width: parseFloat(r.width) || 0,
+                        height: parseFloat(r.height) || 0,
+                    })),
                     source: c.source,
                     createdAt: apiAnnotation.created_at || new Date().toISOString(),
                     segments: isCombined ? segments : undefined,

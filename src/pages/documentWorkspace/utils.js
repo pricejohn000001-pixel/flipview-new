@@ -63,3 +63,60 @@ export const getWorkspaceStackPosition = (count, maxSpread = WORKSPACE_LEFT_STAC
   return { baseY, leftOffset };
 };
 
+export const getVisibleWorkspaceCenter = (pan, zoom) => {
+  const centerX = 0.5;
+  const centerY = 0.5;
+  const x = centerX - (pan?.x || 0) / ((zoom || 1) * 6000);
+  const y = centerY - (pan?.y || 0) / ((zoom || 1) * 6000);
+
+  return {
+    x: clamp(x, 0.05, 0.95),
+    y: clamp(y, 0.05, 0.95)
+  };
+};
+
+export const findSmartPosition = (center, existingItems, zoom = 1, preferredPosition = null) => {
+  // Use preferred position as the starting point if provided, otherwise use the visible center
+  const startX = preferredPosition?.x ?? center.x;
+  const startY = preferredPosition?.y ?? center.y;
+
+  // Try central/preferred position first
+  let candidates = [{ x: startX, y: startY }];
+
+  // Spiral out
+  const steps = 8;
+  const radiusStep = 0.04; // 4% of canvas 
+  for (let r = 1; r <= 3; r++) {
+    for (let i = 0; i < steps; i++) {
+      const angle = (i / steps) * Math.PI * 2;
+      candidates.push({
+        x: clamp(startX + Math.cos(angle) * (r * radiusStep), 0.05, 0.95),
+        y: clamp(startY + Math.sin(angle) * (r * radiusStep), 0.05, 0.95)
+      });
+    }
+  }
+
+  // Find first candidate that isn't too close to an existing item
+  const THRESHOLD = 0.05; // 300px at 1x zoom
+
+  for (const cand of candidates) {
+    const collision = existingItems.some(item => {
+      const dx = item.x - cand.x;
+      const dy = item.y - cand.y;
+      return (dx * dx + dy * dy) < (THRESHOLD * THRESHOLD);
+    });
+    if (!collision) {
+      // Add a tiny jitter to look organic
+      return {
+        x: cand.x + (Math.random() - 0.5) * 0.01,
+        y: cand.y + (Math.random() - 0.5) * 0.01
+      };
+    }
+  }
+
+  // Fallback: center + random large offset if everything is full
+  return {
+    x: clamp(startX + (Math.random() - 0.5) * 0.1, 0.05, 0.95),
+    y: clamp(startY + (Math.random() - 0.5) * 0.1, 0.05, 0.95)
+  };
+};

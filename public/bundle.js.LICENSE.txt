@@ -10,31 +10,6 @@ object-assign
 	http://jedwatson.github.io/classnames
 */
 
-/*!
- * Sizzle CSS Selector Engine v2.2.1
- * http://sizzlejs.com/
- *
- * Copyright jQuery Foundation and other contributors
- * Released under the MIT license
- * http://jquery.org/license
- *
- * Date: 2015-10-17
- */
-
-/*!
- * jQuery JavaScript Library v1.12.0
- * http://jquery.com/
- *
- * Includes Sizzle.js
- * http://sizzlejs.com/
- *
- * Copyright jQuery Foundation and other contributors
- * Released under the MIT license
- * http://jquery.org/license
- *
- * Date: 2016-01-08T19:56Z
- */
-
 /*! regenerator-runtime -- Copyright (c) 2014-present, Facebook, Inc. -- license (MIT): https://github.com/babel/babel/blob/main/packages/babel-helpers/LICENSE */
 
 /**

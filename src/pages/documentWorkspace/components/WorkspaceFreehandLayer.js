@@ -1,13 +1,11 @@
-import React, { useCallback, useRef, useState } from 'react';
+import React, { useCallback, useRef, useState, useImperativeHandle, forwardRef } from 'react';
 import styles from '../documentWorkspace.module.css';
 
 /**
  * WorkspaceFreehandLayer
  * ----------------------
  * Provides a freehand drawing surface that covers the entire workspace pane.
- * Drawing is only enabled when the global Freehand tool is active; otherwise
- * the layer is transparent and ignores pointer events so existing workspace
- * items remain interactive.
+ * Now exposes event handlers via ref for external control (infinite canvas support).
  */
 const VIEWBOX_SIZE = 1000;
 const clampValue = (value, min, max) => Math.min(Math.max(value, min), max);
@@ -55,7 +53,7 @@ const doesStrokeHitPoint = (stroke, point) => {
   return false;
 };
 
-const WorkspaceFreehandLayer = ({
+const WorkspaceFreehandLayer = forwardRef(({
   activeTool,
   activeColor,
   activeBrushSize,
@@ -63,7 +61,7 @@ const WorkspaceFreehandLayer = ({
   freehandMode = 'freehand',
   isPressureEnabled = true,
   eraserToolId = 'workspaceEraser',
-}) => {
+}, ref) => {
   const containerRef = useRef(null);
   const [drawingState, setDrawingState] = useState(null);
   const [strokes, setStrokes] = useState([]);
@@ -100,8 +98,8 @@ const WorkspaceFreehandLayer = ({
       const container = containerRef.current;
       if (!container) return;
 
-      event.preventDefault();
-      event.stopPropagation();
+      // Only checking event.button ensures we don't block other interactions if not left-click
+      // but assuming pointer events usually handle this.
 
       const point = getNormalizedPoint(event, container);
 
@@ -163,7 +161,9 @@ const WorkspaceFreehandLayer = ({
       const container = containerRef.current;
       if (!container) return;
 
-      event.preventDefault();
+      // Don't preventDefault here implicitly? Let parent handle?
+      // actually we should if we are drawing.
+      // event.preventDefault(); 
 
       const point = getNormalizedPoint(event, container);
 
@@ -191,7 +191,7 @@ const WorkspaceFreehandLayer = ({
   const handlePointerUp = useCallback(
     (event) => {
       if (!drawingState) {
-        setDrawingState(null);
+        // Just in case
         return;
       }
 
@@ -208,8 +208,6 @@ const WorkspaceFreehandLayer = ({
           // ignore
         }
       }
-
-      event.preventDefault();
 
       const endPoint = getNormalizedPoint(event, container);
 
@@ -244,8 +242,8 @@ const WorkspaceFreehandLayer = ({
         typeof drawingState.opacity === 'number'
           ? drawingState.opacity
           : typeof activeBrushOpacity === 'number'
-          ? activeBrushOpacity
-          : 1;
+            ? activeBrushOpacity
+            : 1;
 
       setStrokes((prev) => [
         ...prev,
@@ -264,10 +262,17 @@ const WorkspaceFreehandLayer = ({
     [drawingState, getNormalizedPoint, activeBrushSize, activeBrushOpacity, activeColor, eraseStrokesNearPoint],
   );
 
+  useImperativeHandle(ref, () => ({
+    handlePointerDown,
+    handlePointerMove,
+    handlePointerUp,
+    isDrawing: !!drawingState,
+  }));
+
   const liveStrokeWidth =
     drawingState?.type === 'freehand'
       ? (drawingState.brushSize || activeBrushSize || 10) *
-        (drawingState.pressureEnabled ? drawingState.pressure || 1 : 1)
+      (drawingState.pressureEnabled ? drawingState.pressure || 1 : 1)
       : null;
 
   const liveStrokeOpacity =
@@ -275,8 +280,8 @@ const WorkspaceFreehandLayer = ({
       ? typeof drawingState.opacity === 'number'
         ? drawingState.opacity
         : typeof activeBrushOpacity === 'number'
-        ? activeBrushOpacity
-        : 1
+          ? activeBrushOpacity
+          : 1
       : null;
 
   const isDrawingActive = activeTool === 'freehand' || activeTool === eraserToolId;
@@ -291,9 +296,21 @@ const WorkspaceFreehandLayer = ({
       ref={containerRef}
       className={styles.workspaceDrawingLayer}
       data-active={isDrawingActive ? 'true' : undefined}
-      onPointerDown={handlePointerDown}
-      onPointerMove={handlePointerMove}
-      onPointerUp={handlePointerUp}
+      onPointerDown={(e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        handlePointerDown(e);
+      }}
+      onPointerMove={(e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        handlePointerMove(e);
+      }}
+      onPointerUp={(e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        handlePointerUp(e);
+      }}
     >
       <svg
         className={styles.workspaceDrawingSvg}
@@ -325,7 +342,7 @@ const WorkspaceFreehandLayer = ({
       </svg>
     </div>
   );
-};
+});
 
 export default WorkspaceFreehandLayer;
 

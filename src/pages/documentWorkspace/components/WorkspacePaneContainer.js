@@ -18,6 +18,7 @@ const WorkspacePaneContainer = () => {
       workspaceItems={workspace.items}
       workspaceComments={workspace.comments}
       workspaceRef={workspace.ref}
+      workspaceContainerRef={workspace.containerRef}
       clippings={clippings}
       selectedClipIds={selectedIds}
       onToggleClipSelection={toggleSelection}
@@ -37,6 +38,13 @@ const WorkspacePaneContainer = () => {
       freehandMode={workspace.freehandMode}
       isPressureEnabled={workspace.isPressureEnabled}
       eraserToolId={WORKSPACE_ERASER_TOOL_ID}
+      workspaceZoom={workspace.zoom}
+      workspacePan={workspace.pan}
+      onWorkspaceWheel={workspace.onWheel}
+      onWorkspacePanStart={workspace.onPanStart}
+      onWorkspacePanMove={workspace.onPanMove}
+      onWorkspacePanEnd={workspace.onPanEnd}
+      tempHighlightItemId={workspace.tempHighlightItemId}
     />
   );
 };

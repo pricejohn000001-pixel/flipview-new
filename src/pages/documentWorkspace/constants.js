@@ -53,7 +53,10 @@ export const WORKSPACE_FIXED_WIDTH_PX = 1000;
 export const WORKSPACE_RESIZER_WIDTH = 18;
 export const WORKSPACE_SLIDE_MIN = 0;
 export const WORKSPACE_SLIDE_MAX = WORKSPACE_FIXED_WIDTH_PX;
-export const WORKSPACE_LEFT_STACK_X = 0.08;
+// Item placement on the 6000px canvas. The canvas center is at fraction 0.5.
+// Items placed at x=0.5 appear at the center of the visible workspace.
+// Items at x=0.45 appear ~300px left of center (left side of workspace).
+export const WORKSPACE_LEFT_STACK_X = 0.45;
 export const WORKSPACE_LEFT_STACK_SPREAD = 0.04;
 
 // API endpoints
