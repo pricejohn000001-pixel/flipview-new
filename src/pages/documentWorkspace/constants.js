@@ -1,7 +1,5 @@
 import {
   MdAutoFixHigh,
-  MdBookmark,
-  MdBookmarkAdd,
   MdBrush,
   MdComment,
   MdContentCut,
@@ -23,7 +21,6 @@ export const TOOL_TYPES = [
   { id: 'freehand', label: 'Freehand', icon: MdBrush },
   { id: WORKSPACE_ERASER_TOOL_ID, label: 'Eraser', icon: MdAutoFixHigh },
   { id: 'comment', label: 'Note', icon: MdComment },
-  { id: 'bookmark', label: 'Bookmark', icon: MdBookmarkAdd },
   { id: 'clip', label: 'Clip Area', icon: MdContentCut },
 ];
 

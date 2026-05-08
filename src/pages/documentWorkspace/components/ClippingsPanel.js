@@ -1,5 +1,5 @@
 import React from 'react';
-import { MdChevronLeft, MdChevronRight } from 'react-icons/md';
+import { MdChevronLeft, MdChevronRight, MdClose } from 'react-icons/md';
 import styles from '../documentWorkspace.module.css';
 
 const ClippingsPanel = ({
@@ -20,12 +20,18 @@ const ClippingsPanel = ({
   <aside className={`${styles.leftPanel} ${isCollapsed ? styles.leftPanelCollapsed : ''}`}>
     <button type="button" className={styles.panelToggle} onClick={onToggleCollapse}>
       {isCollapsed ? <MdChevronRight size={18} /> : <MdChevronLeft size={18} />}
-      <span>{isCollapsed ? 'Open clippings' : 'Collapse clippings'}</span>
     </button>
 
     {!isCollapsed && (
       <>
-        <div className={styles.panelHeader}>Clippings &amp; Excerpts</div>
+        <div className={styles.panelHeader}>
+          <div className={styles.panelHeaderContent}>
+            <h2 className={styles.panelTitle}>Clippings</h2>
+            <button type="button" className={styles.panelClose} onClick={onToggleCollapse}>
+              <MdClose size={20} />
+            </button>
+          </div>
+        </div>
         <div className={styles.panelContent}>
           <div className={styles.toolbarGroup}>
             <button type="button" className={styles.primaryActionButton} onClick={onCreateClipping}>Create clipping</button>

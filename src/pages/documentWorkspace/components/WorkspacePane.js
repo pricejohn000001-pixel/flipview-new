@@ -72,18 +72,28 @@ const WorkspacePane = ({
     return () => container.removeEventListener('wheel', handleWheel);
   }, [onWorkspaceWheel]);
 
-  const renderClipContent = (clip) => {
+  const renderClipContent = (clip, itemId) => {
     if (clip?.segments) {
       return clip.segments.map((seg) => (
         <div
           key={seg.id}
           className={styles.workspaceSegment}
           onPointerDown={(e) => {
-            e.stopPropagation();
-            e.preventDefault();
+            // Do not stop propagation so the card can be dragged by its segments
           }}
           onClick={(e) => {
             e.stopPropagation();
+            
+            // Check if it was a drag or a click
+            const meta = itemId ? pointerMetaRef.current[itemId] : null;
+            if (meta) {
+              const duration = e.timeStamp - meta.time;
+              const distance = Math.hypot(e.clientX - meta.x, e.clientY - meta.y);
+              if (distance > 4) {
+                return; // It was a drag, ignore click
+              }
+            }
+
             const targetPage = getPrimaryPageFromSource(seg.sourcePage);
             if (targetPage) {
               onJumpToPage?.(targetPage);
@@ -136,7 +146,7 @@ const WorkspacePane = ({
         onWorkspacePanStart?.(e);
       }}
       onPointerMove={(e) => {
-        if (draggingWorkspaceItemId) {
+        if (draggingWorkspaceItemIdRef?.current) {
           handleWorkspacePointerMove(e);
         } else if ((activeTool === 'freehand' || activeTool === eraserToolId) && freehandLayerRef.current?.isDrawing) {
           freehandLayerRef.current?.handlePointerMove(e);
@@ -293,7 +303,7 @@ const WorkspacePane = ({
                     <div className={styles.workspaceItemHeader} style={{ color: 'inherit' }}>
                       {clip?.segments ? 'Combined Clip' : 'Clip'}
                     </div>
-                    <div className={styles.workspaceItemContent} style={{ color: 'inherit' }}>{renderClipContent(clip)}</div>
+                    <div className={styles.workspaceItemContent} style={{ color: 'inherit' }}>{renderClipContent(clip, item.id)}</div>
                   </div>
                 )}
 

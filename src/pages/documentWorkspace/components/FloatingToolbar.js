@@ -1,6 +1,10 @@
 import React, { useEffect, useRef } from 'react';
 import {
   MdCrop,
+  MdZoomIn,
+  MdZoomOut,
+  MdSearch,
+  MdClose,
 } from 'react-icons/md';
 import styles from '../documentWorkspace.module.css';
 import FreehandPalette from './FreehandPalette';
@@ -28,6 +32,10 @@ const FloatingToolbar = ({
   onToggleFreehandCommentMode,
   isHighlightView = false,
   onToggleHighlightView,
+  primaryScale,
+  onManualZoom,
+  onSearchClick,
+  isSearchOpen,
 }) => {
   const paletteRef = useRef(null);
   const freehandButtonRef = useRef(null);
@@ -46,7 +54,48 @@ const FloatingToolbar = ({
   return (
     <div className={styles.floatingToolbarContainerBottom}>
       <div className={styles.floatingToolbarStack}>
+        {isFreehandPaletteVisible && (
+          <FreehandPalette
+            ref={paletteRef}
+            freehandMode={freehandMode}
+            onFreehandModeChange={onFreehandModeChange}
+            freehandColorOptions={freehandColorOptions}
+            activeColor={activeColor}
+            onColorSelect={onColorSelect}
+            brushSizeOptions={brushSizeOptions}
+            activeBrushSize={activeBrushSize}
+            onBrushSizeSelect={onBrushSizeSelect}
+            activeBrushOpacity={activeBrushOpacity}
+            onBrushOpacityChange={onBrushOpacityChange}
+            isPressureEnabled={isPressureEnabled}
+            onTogglePressure={onTogglePressure}
+            isFreehandCommentMode={isFreehandCommentMode}
+            onToggleFreehandCommentMode={onToggleFreehandCommentMode}
+          />
+        )}
         <div className={styles.floatingToolbar}>
+          <div className={styles.toolbarIconGroup}>
+            <button
+              type="button"
+              className={styles.toolIconButton}
+              onClick={() => onManualZoom('out')}
+              title="Zoom out"
+            >
+              <MdZoomOut size={18} />
+            </button>
+            <span className={styles.zoomValue}>{Math.round(primaryScale * 100)}%</span>
+            <button
+              type="button"
+              className={styles.toolIconButton}
+              onClick={() => onManualZoom('in')}
+              title="Zoom in"
+            >
+              <MdZoomIn size={18} />
+            </button>
+          </div>
+
+          <div className={styles.toolbarDivider} />
+
           <div className={styles.toolbarIconGroup}>
             {toolTypes.map(({ id, label, icon: Icon }) => (
               <button
@@ -87,29 +136,17 @@ const FloatingToolbar = ({
               >
                 <MdCrop size={18} />
               </button>
+              <button
+                type="button"
+                className={`${styles.toolIconButton} ${isSearchOpen ? styles.toolIconButtonActive : ''}`}
+                onClick={onSearchClick}
+                title="Search"
+              >
+                {isSearchOpen ? <MdClose size={18} /> : <MdSearch size={18} />}
+              </button>
             </div>
           </div>
         </div>
-
-        {isFreehandPaletteVisible && (
-          <FreehandPalette
-            ref={paletteRef}
-            freehandMode={freehandMode}
-            onFreehandModeChange={onFreehandModeChange}
-            freehandColorOptions={freehandColorOptions}
-            activeColor={activeColor}
-            onColorSelect={onColorSelect}
-            brushSizeOptions={brushSizeOptions}
-            activeBrushSize={activeBrushSize}
-            onBrushSizeSelect={onBrushSizeSelect}
-            activeBrushOpacity={activeBrushOpacity}
-            onBrushOpacityChange={onBrushOpacityChange}
-            isPressureEnabled={isPressureEnabled}
-            onTogglePressure={onTogglePressure}
-            isFreehandCommentMode={isFreehandCommentMode}
-            onToggleFreehandCommentMode={onToggleFreehandCommentMode}
-          />
-        )}
       </div>
     </div>
   );

@@ -1,6 +1,5 @@
 import React from 'react';
 import RightPanel from './RightPanel';
-import { ANNOTATION_TYPES } from '../constants';
 import { useRightPanelApi } from '../context/DocumentWorkspaceContext';
 
 const RightPanelContainer = () => {
@@ -16,13 +15,17 @@ const RightPanelContainer = () => {
     bookmarks,
     onBookmarkJump,
     onBookmarkRemove,
+    pdfOutlines,
+    onOutlineJump,
+    workspaceComments,
+    pageRefs,
+    viewerZoomWrapperRef,
   } = useRightPanelApi();
 
   return (
     <RightPanel
       isCollapsed={isCollapsed}
       onToggleCollapse={toggleCollapse}
-      annotationTypes={ANNOTATION_TYPES}
       annotationFilters={annotationFilters}
       toggleAnnotationFilter={toggleAnnotationFilter}
       annotationDescriptions={annotationDescriptions}
@@ -32,6 +35,11 @@ const RightPanelContainer = () => {
       bookmarks={bookmarks}
       onBookmarkJump={onBookmarkJump}
       onBookmarkRemove={onBookmarkRemove}
+      pdfOutlines={pdfOutlines}
+      onOutlineJump={onOutlineJump}
+      workspaceComments={workspaceComments}
+      pageRefs={pageRefs}
+      viewerZoomWrapperRef={viewerZoomWrapperRef}
     />
   );
 };

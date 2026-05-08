@@ -200,8 +200,9 @@ export const useDocumentWorkspaceController = () => {
   const initialPrimaryScale = isTabletInitial ? 0.8 : 1.0;
   const [primaryScale, setPrimaryScale] = useState(initialPrimaryScale);
   const [isTablet, setIsTablet] = useState(isTabletInitial);
-  const [isRightPanelCollapsed, setIsRightPanelCollapsed] = useState(isTabletInitial);
-  const [isClippingsPanelCollapsed, setIsClippingsPanelCollapsed] = useState(isTabletInitial);
+  const [isRightPanelCollapsed, setIsRightPanelCollapsed] = useState(true);
+  const [isClippingsPanelCollapsed, setIsClippingsPanelCollapsed] = useState(true);
+  const [pdfOutlines, setPdfOutlines] = useState([]);
   // Responsive workspace width (px). Start with a computed value based on
   // viewport but capped at the legacy fixed max.
   const computeWorkspaceWidth = () => {
@@ -537,10 +538,19 @@ export const useDocumentWorkspaceController = () => {
   }, [detectSelectionPage]);
 
   // ---------- PDF load ----------
-  const onDocumentLoadSuccess = useCallback((pdfInstance) => {
+  const onDocumentLoadSuccess = useCallback(async (pdfInstance) => {
     setNumPages(pdfInstance.numPages);
     pdfProxyRef.current = pdfInstance;
     setIsPdfReady(true);
+    
+    try {
+      const outlines = await pdfInstance.getOutline();
+      if (outlines) {
+        setPdfOutlines(outlines);
+      }
+    } catch (error) {
+      console.error('Failed to load PDF outlines:', error);
+    }
   }, []);
 
   // ---------- Automatic OCR ----------
@@ -969,27 +979,8 @@ export const useDocumentWorkspaceController = () => {
       ? (typeof drawingState.opacity === 'number' ? drawingState.opacity : activeBrushOpacity || DEFAULT_BRUSH_OPACITY)
       : null;
 
-  // ---------- WORKSPACE EXPANSION ON NAV COLLAPSE ----------
-  const lastRightPanelCollapsedRef = useRef(isRightPanelCollapsed);
-
-  useEffect(() => {
-    // Only adjust slide if there's a real change in state
-    if (lastRightPanelCollapsedRef.current !== isRightPanelCollapsed) {
-      const diff = 600; // 300px - 64px from CSS
-
-      if (isRightPanelCollapsed) {
-        // Collapsing: Wait for nav to collapse, then move workspace left
-        const timeout = setTimeout(() => {
-          setWorkspaceSlide((prev) => Math.max(WORKSPACE_SLIDE_MIN, prev - diff));
-        }, 300); // Match CSS transition duration
-        return () => clearTimeout(timeout);
-      } else {
-        // Expanding: Move workspace right immediately to make room for nav
-        setWorkspaceSlide((prev) => Math.min(workspaceWidth, prev + diff));
-      }
-      lastRightPanelCollapsedRef.current = isRightPanelCollapsed;
-    }
-  }, [isRightPanelCollapsed, workspaceWidth]);
+  // ---------- WORKSPACE POSITION PERSISTS ON NAV CHANGE ----------
+  // Removed the slide adjustment to keep workspace position persistent
 
   const workspaceVisibleWidth = Math.max(workspaceWidth - workspaceSlide, 0);
   const documentRightPadding = workspaceVisibleWidth + WORKSPACE_RESIZER_WIDTH;
@@ -2277,21 +2268,61 @@ export const useDocumentWorkspaceController = () => {
   const handleAnnotationJump = useCallback((annotation) => {
     if (!annotation) return;
 
+    // 1. If it's a workspace comment (has an ID that exists in workspaceItems)
+    //    we should pan the workspace to that card instead of scrolling the PDF.
+    const wsItem = workspaceItems.find(it => it.id === annotation.id || it.sourceId === annotation.id);
+    if (wsItem) {
+      const containerEl = workspaceContainerRef.current;
+      if (containerEl) {
+        const rect = containerEl.getBoundingClientRect();
+        // The coordinate math in the workspace uses 6000x6000px virtual canvas.
+        // Center is at 3000, 3000.
+        // Screen position = containerCenter + pan + (canvasPos - 3000) * zoom
+        // We want item screen position to be at container center.
+        // So: containerCenter = containerCenter + newPan + (canvasPos - 3000) * zoom
+        // 0 = newPan + (canvasPos - 3000) * zoom
+        // newPan = -(canvasPos - 3000) * zoom
+        
+        const targetPanX = -(wsItem.x * 6000 - 3000) * workspaceZoom;
+        const targetPanY = -(wsItem.y * 6000 - 3000) * workspaceZoom;
+
+        setWorkspacePan({ x: targetPanX, y: targetPanY });
+
+        // Pulse the card (blip)
+        setTempHighlightItemId(wsItem.id);
+        setTimeout(() => setTempHighlightItemId(null), 2000);
+        // Do not return here, continue to scroll the PDF as well
+      }
+    }
+
     const pageNumber = annotation.pageNumber;
     setPrimaryPage(pageNumber);
 
     // Scroll to the page and highlight
     setTimeout(() => {
-      const pageEl = pageRefs.current[pageNumber];
-      if (pageEl && viewerZoomWrapperRef.current) {
-        const pageRect = pageEl.getBoundingClientRect();
-        const wrapperRect = viewerZoomWrapperRef.current.getBoundingClientRect();
-        const scrollTop = viewerZoomWrapperRef.current.scrollTop;
-        const targetY = pageRect.top - wrapperRect.top + scrollTop - 100;
-        viewerZoomWrapperRef.current.scrollTo({
-          top: Math.max(0, targetY),
-          behavior: 'smooth',
-        });
+      if (pageRefs && pageRefs.current) {
+        const pageEl = pageRefs.current[pageNumber];
+        if (pageEl && viewerZoomWrapperRef.current) {
+          const pageRect = pageEl.getBoundingClientRect();
+          const wrapperRect = viewerZoomWrapperRef.current.getBoundingClientRect();
+          const scrollTop = viewerZoomWrapperRef.current.scrollTop;
+          
+          // Calculate the target Y within the page if position is available
+          let scrollOffset = 100; // default offset
+          if (annotation.position && annotation.position.y) {
+            // position.y is normalized (0 to 1)
+            scrollOffset = -(annotation.position.y * pageRect.height) + (wrapperRect.height / 2);
+          } else if (annotation.rects && annotation.rects.length > 0 && annotation.rects[0].y) {
+            scrollOffset = -(annotation.rects[0].y * pageRect.height) + (wrapperRect.height / 2);
+          }
+
+          const targetY = pageRect.top - wrapperRect.top + scrollTop - scrollOffset;
+          
+          viewerZoomWrapperRef.current.scrollTo({
+            top: Math.max(0, targetY),
+            behavior: 'smooth',
+          });
+        }
       }
 
       // Create a temporary highlight at the annotation position
@@ -2329,7 +2360,7 @@ export const useDocumentWorkspaceController = () => {
         }, 2000);
       }
     }, 100);
-  }, []);
+  }, [workspaceItems, workspaceZoom, workspacePan, pageRefs, viewerZoomWrapperRef, setTempHighlightItemId]);
 
   const annotationDescriptions = useMemo(() => ({
     highlight: 'Highlight',
@@ -3136,6 +3167,50 @@ export const useDocumentWorkspaceController = () => {
     goToPreviousResult: goToPreviousSearchResult,
   }), [isSearching, searchResults, activeSearchResultIndex, goToNextSearchResult, goToPreviousSearchResult]);
 
+  const getPageNumberFromDest = useCallback(async (dest) => {
+    if (!pdfProxyRef.current) return null;
+    
+    try {
+      const explicitDest = typeof dest === 'string' 
+        ? await pdfProxyRef.current.getDestination(dest)
+        : dest;
+      
+      if (!explicitDest) return null;
+      
+      const pageRef = explicitDest[0];
+      const pageIndex = await pdfProxyRef.current.getPageIndex(pageRef);
+      return pageIndex + 1;
+    } catch (error) {
+      console.error('Failed to get page number from destination:', error);
+      return null;
+    }
+  }, []);
+  
+  const handleOutlineJump = useCallback(async (outline) => {
+    if (!outline.dest) return;
+    const pageNumber = await getPageNumberFromDest(outline.dest);
+    if (pageNumber) {
+      setPrimaryPage(pageNumber);
+
+      // Scroll to the page
+      setTimeout(() => {
+        if (pageRefs && pageRefs.current) {
+          const pageEl = pageRefs.current[pageNumber];
+          if (pageEl && viewerZoomWrapperRef && viewerZoomWrapperRef.current) {
+            const pageRect = pageEl.getBoundingClientRect();
+            const wrapperRect = viewerZoomWrapperRef.current.getBoundingClientRect();
+            const scrollTop = viewerZoomWrapperRef.current.scrollTop;
+            const targetY = pageRect.top - wrapperRect.top + scrollTop - 100;
+            viewerZoomWrapperRef.current.scrollTo({
+              top: Math.max(0, targetY),
+              behavior: 'smooth',
+            });
+          }
+        }
+      }, 100);
+    }
+  }, [getPageNumberFromDest, setPrimaryPage, pageRefs, viewerZoomWrapperRef]);
+
   const rightPanelApi = useMemo(() => ({
     isCollapsed: isRightPanelCollapsed,
     toggleCollapse: handleToggleRightPanel,
@@ -3148,6 +3223,9 @@ export const useDocumentWorkspaceController = () => {
     bookmarks,
     onBookmarkJump: setPrimaryPage,
     onBookmarkRemove: handleRemoveBookmark,
+    pdfOutlines,
+    onOutlineJump: handleOutlineJump,
+    workspaceComments,
   }), [
     isRightPanelCollapsed,
     handleToggleRightPanel,
@@ -3160,12 +3238,16 @@ export const useDocumentWorkspaceController = () => {
     bookmarks,
     setPrimaryPage,
     handleRemoveBookmark,
+    pdfOutlines,
+    handleOutlineJump,
+    workspaceComments,
   ]);
 
   const workspaceApi = useMemo(() => ({
     slide: workspaceSlide,
     visibleWidth: workspaceVisibleWidth,
     width: workspaceWidth,
+    setSlide: setWorkspaceSlide,
     items: workspaceItems,
     comments: workspaceComments,
     ref: workspaceRef,
@@ -3198,6 +3280,7 @@ export const useDocumentWorkspaceController = () => {
     workspaceSlide,
     workspaceVisibleWidth,
     workspaceWidth,
+    setWorkspaceSlide,
     workspaceItems,
     workspaceComments,
     workspaceRef,

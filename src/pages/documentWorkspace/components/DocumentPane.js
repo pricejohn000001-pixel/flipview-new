@@ -1,7 +1,7 @@
 import React, { useMemo, useEffect, useState } from 'react';
 import { Document, Page } from 'react-pdf';
-import { MdBookmark } from 'react-icons/md';
-import demoPdf from '../../../assets/WPC.pdf';
+import { MdBookmark, MdChat } from 'react-icons/md';
+import demoPdf from '../../../assets/ww.pdf';
 import styles from '../documentWorkspace.module.css';
 import {
   DEFAULT_BRUSH_OPACITY,
@@ -44,6 +44,47 @@ const DocumentPane = () => {
 
   const { items: clippings } = useClippingsApi();
   const { comments: workspaceComments } = useWorkspaceApi();
+
+  const [activeNoteId, setActiveNoteId] = useState(null);
+
+  // Close active note when clicking elsewhere
+  useEffect(() => {
+    if (!activeNoteId) return;
+    const handleClickOutside = (e) => {
+      if (!e.target.closest(`.${styles.noteBadge}`)) {
+        setActiveNoteId(null);
+      }
+    };
+    document.addEventListener('pointerdown', handleClickOutside);
+    return () => document.removeEventListener('pointerdown', handleClickOutside);
+  }, [activeNoteId]);
+
+  const handleNoteClick = (e, annotationId) => {
+    // If it was a drag, don't toggle
+    if (e.pointerType === 'touch') {
+      e.preventDefault();
+      e.stopPropagation();
+      setActiveNoteId(prev => (prev === annotationId ? null : annotationId));
+    }
+  };
+
+  const handleNoteWheel = (e) => {
+    // Stop propagation to prevent the PDF viewer from scrolling
+    // when the mouse is over the note tooltip
+    e.stopPropagation();
+  };
+
+  const handleContainerWheel = (e) => {
+    // If we are scrolling inside a noteBadge tooltip, prevent the container from scrolling
+    if (e.target.closest(`.${styles.noteBadge}`)) {
+      // Check if the target is actually scrollable and needs to scroll
+      const tooltip = e.target.closest(`.${styles.noteBadge}`);
+      if (tooltip) {
+        // We stop propagation here as well to be safe
+        e.stopPropagation();
+      }
+    }
+  };
 
   const annotationsToRender = useMemo(
     () => {
@@ -219,6 +260,7 @@ const DocumentPane = () => {
   return (
     <div
       className={styles.documentPane}
+      onWheel={handleContainerWheel}
       style={{ paddingRight: `${Math.max(documentRightPadding, WORKSPACE_RESIZER_WIDTH)}px` }}
     >
       <div
@@ -456,15 +498,21 @@ const DocumentPane = () => {
                               key={annotation.id}
                               type="button"
                               className={styles.noteBadge}
+                              data-position-y={annotation.position.y < 0.2 ? 'top' : annotation.position.y > 0.8 ? 'bottom' : 'middle'}
+                              data-position-x={annotation.position.x > 0.7 ? 'right' : 'left'}
+                              data-active={activeNoteId === annotation.id}
                               style={{
                                 left: `${annotation.position.x * 100}%`,
                                 top: `${annotation.position.y * 100}%`,
                                 backgroundColor: annotation.color,
                               }}
+                              onClick={(e) => handleNoteClick(e, annotation.id)}
                               onPointerDown={(event) => handleStartDraggingNote(event, annotation)}
+                              onWheel={handleNoteWheel}
                               title={annotation.linkedText ? `Linked: ${annotation.linkedText}` : 'Note'}
+                              data-content={annotation.content}
                             >
-                              <strong>Note</strong> {annotation.content}
+                              <MdChat size={14} />
                             </button>
                           ))}
 

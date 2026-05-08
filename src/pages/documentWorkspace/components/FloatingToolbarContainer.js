@@ -31,7 +31,10 @@ const FloatingToolbarContainer = () => {
     setIsHighlightView,
     setHighlightViewCropZoom,
     isTablet,
+    primaryScale,
+    manualZoom,
   } = useToolbarApi();
+  const { isSearchBarOpen, toggleSearchBar } = useToolbarApi();
 
   const handleToggleHighlightView = () => {
     setIsHighlightView((prev) => {
@@ -67,6 +70,10 @@ const FloatingToolbarContainer = () => {
       setIsFreehandCommentMode((prev) => !prev),
     isHighlightView,
     onToggleHighlightView: handleToggleHighlightView,
+    primaryScale,
+    onManualZoom: manualZoom,
+    onSearchClick: toggleSearchBar,
+    isSearchOpen: isSearchBarOpen,
   };
 
   return (
