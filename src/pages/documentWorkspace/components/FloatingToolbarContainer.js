@@ -27,24 +27,11 @@ const FloatingToolbarContainer = () => {
     dismissPalette,
     isFreehandCommentMode,
     setIsFreehandCommentMode,
-    isHighlightView,
-    setIsHighlightView,
-    setHighlightViewCropZoom,
     isTablet,
     primaryScale,
     manualZoom,
   } = useToolbarApi();
   const { isSearchBarOpen, toggleSearchBar } = useToolbarApi();
-
-  const handleToggleHighlightView = () => {
-    setIsHighlightView((prev) => {
-      const next = !prev;
-      if (!next) {
-        setHighlightViewCropZoom(1.0);
-      }
-      return next;
-    });
-  };
 
   const toolbarProps = {
     toolTypes: TOOL_TYPES,
@@ -68,8 +55,6 @@ const FloatingToolbarContainer = () => {
     isFreehandCommentMode,
     onToggleFreehandCommentMode: () =>
       setIsFreehandCommentMode((prev) => !prev),
-    isHighlightView,
-    onToggleHighlightView: handleToggleHighlightView,
     primaryScale,
     onManualZoom: manualZoom,
     onSearchClick: toggleSearchBar,

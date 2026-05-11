@@ -11,6 +11,7 @@ const SelectionMenu = () => {
     <div
       className={styles.selectionCommentMenu}
       style={{ left: menu.x, top: menu.y }}
+      data-selection-menu="true"
     >
       <button
         type="button"

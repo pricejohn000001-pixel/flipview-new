@@ -36,8 +36,6 @@ const DocumentPane = () => {
     handleStartDraggingBookmark,
     bookmarks,
     documentRightPadding,
-    isHighlightView,
-    highlightBoundsPerPage,
     isPdfOutOfViewport,
     handleAnnotationClick, // Destructure new handler
   } = useDocumentApi();
@@ -268,44 +266,12 @@ const DocumentPane = () => {
         className={`${styles.viewerZoomWrapper} ${isPdfOutOfViewport ? styles.viewerZoomWrapperLeftAligned : ''
           }`}
       >
-        <Document file={pdfUrl || demoPdf} onLoadSuccess={handleDocumentLoadSuccess}>
+        <Document file={demoPdf} onLoadSuccess={handleDocumentLoadSuccess}>
           <section
             className={styles.multiPageContainer}
-            data-highlight-view={isHighlightView ? 'true' : undefined}
-            style={
-              isHighlightView
-                ? { '--crop-progress': highlightBoundsPerPage?.avgCropProgress || 0 }
-                : undefined
-            }
           >
             {Array.from({ length: numPages || 0 }, (_, index) => {
               const pageNumber = index + 1;
-              const hasPageHighlights = highlightBoundsPerPage?.bounds?.[pageNumber]?.hasHighlights;
-              // Only hide pages in highlight view if there are actually highlights in the document
-              // If no highlights exist at all, show all pages to prevent PDF from vanishing
-              const hasAnyHighlightsInDocument = highlightBoundsPerPage?.avgCropProgress > 0;
-              if (isHighlightView && !hasPageHighlights && hasAnyHighlightsInDocument) {
-                return null;
-              }
-
-              const pageBounds = highlightBoundsPerPage?.bounds?.[pageNumber];
-              const highlightStyle =
-                isHighlightView && pageBounds?.hasHighlights
-                  ? (() => {
-                    const style = {
-                      clipPath: `inset(${pageBounds.clipTop}% 0% ${pageBounds.clipBottom}% 0%)`,
-                      transition:
-                        'clip-path 0.4s cubic-bezier(0.4, 0, 0.2, 1), -webkit-mask-image 0.4s cubic-bezier(0.4, 0, 0.2, 1), mask-image 0.4s cubic-bezier(0.4, 0, 0.2, 1)',
-                    };
-                    if (pageBounds.maskImage && pageBounds.maskStrength > 0) {
-                      style.WebkitMaskImage = pageBounds.maskImage;
-                      style.maskImage = pageBounds.maskImage;
-                      style.WebkitMaskComposite = 'source-in';
-                      style.maskComposite = 'intersect';
-                    }
-                    return style;
-                  })()
-                  : undefined;
 
               // Use pre-calculated height or a fallback estimate
               const heightStyle = pageUnscaledHeights[pageNumber]
@@ -325,10 +291,6 @@ const DocumentPane = () => {
                   {visiblePages.has(pageNumber) ? (
                     <div
                       className={styles.viewerCanvas}
-                      data-highlight-view={
-                        isHighlightView && hasPageHighlights ? 'true' : undefined
-                      }
-                      style={highlightStyle}
                     >
                       <Page
                         pageNumber={pageNumber}

@@ -173,8 +173,6 @@ export const useDocumentWorkspaceController = () => {
   const [isSearchBarOpen, setIsSearchBarOpen] = useState(false);
   const [isWorkspaceResizing, setIsWorkspaceResizing] = useState(false);
   const [selectionMenu, setSelectionMenu] = useState(null);
-  const [isHighlightView, setIsHighlightView] = useState(false);
-  const [highlightViewCropZoom, setHighlightViewCropZoom] = useState(1.0); // Separate zoom for cropping, not page scale
   const [isPdfOutOfViewport, setIsPdfOutOfViewport] = useState(false);
 
   // drawing / clippings / search
@@ -519,7 +517,12 @@ export const useDocumentWorkspaceController = () => {
 
   // ---------- selection capture ----------
   useEffect(() => {
-    const captureSelection = () => {
+    const captureSelection = (e) => {
+      // If we clicked inside the selection menu, don't clear it
+      if (e && e.target && e.target.closest && e.target.closest('[data-selection-menu="true"]')) {
+        return;
+      }
+
       const sel = window.getSelection();
       if (!sel || sel.rangeCount === 0 || sel.getRangeAt(0).collapsed) {
         currentSelectionRef.current = { text: '', range: null, pageNumber: null };
@@ -539,19 +542,73 @@ export const useDocumentWorkspaceController = () => {
         setSelectionMenu(null);
         return;
       }
+
+      // Constrain position within the PDF viewer viewport
+      const wrapper = viewerZoomWrapperRef.current;
+      if (!wrapper) {
+        setSelectionMenu(null);
+        return;
+      }
+
+      const wrapperRect = wrapper.getBoundingClientRect();
+      
+      // Check if selection is even partially visible in the viewport
+      const isVisibleInViewport = (
+        rect.bottom >= wrapperRect.top &&
+        rect.top <= wrapperRect.bottom &&
+        rect.right >= wrapperRect.left &&
+        rect.left <= wrapperRect.right
+      );
+
+      if (!isVisibleInViewport) {
+        setSelectionMenu(null);
+        return;
+      }
+
+      // Calculate Y position relative to viewport boundaries
+      const MARGIN = 70; // Space needed for the menu
+      let yPos;
+      let placement;
+
+      // Default: show above selection
+      if (rect.top - wrapperRect.top > MARGIN) {
+        yPos = rect.top - 10;
+        placement = 'top';
+      } 
+      // Fallback: show below selection if there's space in viewport
+      else if (wrapperRect.bottom - rect.bottom > MARGIN) {
+        yPos = rect.bottom + 55;
+        placement = 'bottom';
+      }
+      // Last resort: pin to top of viewport if selection is partially off-screen
+      else {
+        yPos = wrapperRect.top + 60;
+        placement = 'bottom';
+      }
+
       setSelectionMenu({
-        x: rect.left + rect.width / 2,
-        y: Math.max(rect.top - 40, 12),
+        x: clamp(rect.left + rect.width / 2, wrapperRect.left + 80, wrapperRect.right - 80),
+        y: yPos,
         quote: normalizedText,
+        placement,
       });
     };
     document.addEventListener('selectionchange', captureSelection);
     document.addEventListener('mousedown', captureSelection);
     document.addEventListener('touchstart', captureSelection);
+
+    const wrapper = viewerZoomWrapperRef.current;
+    if (wrapper) {
+      wrapper.addEventListener('scroll', captureSelection, { passive: true });
+    }
+
     return () => {
       document.removeEventListener('selectionchange', captureSelection);
       document.removeEventListener('mousedown', captureSelection);
       document.removeEventListener('touchstart', captureSelection);
+      if (wrapper) {
+        wrapper.removeEventListener('scroll', captureSelection);
+      }
     };
   }, [detectSelectionPage]);
 
@@ -717,274 +774,6 @@ export const useDocumentWorkspaceController = () => {
     () => annotations.filter((a) => annotationFilters[a.type] && !a.isTemporary),
     [annotations, annotationFilters]
   );
-
-  // Calculate highlight bounding boxes per page for highlight view
-  const highlightBoundsPerPage = useMemo(() => {
-    const bounds = {};
-    const highlightRectsPerPage = {}; // Store individual annotation rectangles per page
-
-    // First pass: collect all individual annotation rectangles (all types)
-    filteredAnnotations.forEach((ann) => {
-      const pageNum = ann.pageNumber;
-      if (!highlightRectsPerPage[pageNum]) {
-        highlightRectsPerPage[pageNum] = [];
-        bounds[pageNum] = { minX: 1, minY: 1, maxX: 0, maxY: 0, hasHighlights: false };
-      }
-
-      // Handle different annotation types
-      if (ann.type === 'highlight') {
-        if (ann.position) {
-          const { x, y, width, height } = ann.position;
-          highlightRectsPerPage[pageNum].push({ top: y, bottom: y + height, left: x, right: x + width });
-          bounds[pageNum].minX = Math.min(bounds[pageNum].minX, x);
-          bounds[pageNum].minY = Math.min(bounds[pageNum].minY, y);
-          bounds[pageNum].maxX = Math.max(bounds[pageNum].maxX, x + width);
-          bounds[pageNum].maxY = Math.max(bounds[pageNum].maxY, y + height);
-          bounds[pageNum].hasHighlights = true;
-        } else if (ann.rects && ann.rects.length > 0) {
-          ann.rects.forEach((r) => {
-            highlightRectsPerPage[pageNum].push({ top: r.y, bottom: r.y + r.height, left: r.x, right: r.x + r.width });
-            bounds[pageNum].minX = Math.min(bounds[pageNum].minX, r.x);
-            bounds[pageNum].minY = Math.min(bounds[pageNum].minY, r.y);
-            bounds[pageNum].maxX = Math.max(bounds[pageNum].maxX, r.x + r.width);
-            bounds[pageNum].maxY = Math.max(bounds[pageNum].maxY, r.y + r.height);
-            bounds[pageNum].hasHighlights = true;
-          });
-        }
-      } else if (ann.type === 'underline' || ann.type === 'strike') {
-        // For underline/strike, use lines to calculate bounds
-        if (ann.lines && ann.lines.length > 0) {
-          const lineYs = ann.lines.map(l => l.y1);
-          const lineXs = ann.lines.flatMap(l => [l.x1, l.x2]);
-          const minY = Math.min(...lineYs);
-          const maxY = Math.max(...lineYs);
-          const minX = Math.min(...lineXs);
-          const maxX = Math.max(...lineXs);
-          const height = Math.max(0.01, maxY - minY); // Minimum height for lines
-          highlightRectsPerPage[pageNum].push({ top: minY, bottom: maxY + height, left: minX, right: maxX });
-          bounds[pageNum].minX = Math.min(bounds[pageNum].minX, minX);
-          bounds[pageNum].minY = Math.min(bounds[pageNum].minY, minY);
-          bounds[pageNum].maxX = Math.max(bounds[pageNum].maxX, maxX);
-          bounds[pageNum].maxY = Math.max(bounds[pageNum].maxY, maxY + height);
-          bounds[pageNum].hasHighlights = true;
-        }
-      } else if (ann.type === 'freehand') {
-        // For freehand, use points to calculate bounds
-        if (ann.points && ann.points.length > 0) {
-          const xs = ann.points.map(p => p.x);
-          const ys = ann.points.map(p => p.y);
-          const minX = Math.min(...xs);
-          const maxX = Math.max(...xs);
-          const minY = Math.min(...ys);
-          const maxY = Math.max(...ys);
-          const strokeWidth = (ann.strokeWidth || DEFAULT_BRUSH_SIZE) / 100; // Normalize stroke width
-          highlightRectsPerPage[pageNum].push({
-            top: Math.max(0, minY - strokeWidth),
-            bottom: Math.min(1, maxY + strokeWidth),
-            left: Math.max(0, minX - strokeWidth),
-            right: Math.min(1, maxX + strokeWidth)
-          });
-          bounds[pageNum].minX = Math.min(bounds[pageNum].minX, Math.max(0, minX - strokeWidth));
-          bounds[pageNum].minY = Math.min(bounds[pageNum].minY, Math.max(0, minY - strokeWidth));
-          bounds[pageNum].maxX = Math.max(bounds[pageNum].maxX, Math.min(1, maxX + strokeWidth));
-          bounds[pageNum].maxY = Math.max(bounds[pageNum].maxY, Math.min(1, maxY + strokeWidth));
-          bounds[pageNum].hasHighlights = true;
-        }
-      } else if (ann.type === 'comment') {
-        // For comments, use position
-        if (ann.position) {
-          const { x, y, width, height } = ann.position;
-          highlightRectsPerPage[pageNum].push({ top: y, bottom: y + height, left: x, right: x + width });
-          bounds[pageNum].minX = Math.min(bounds[pageNum].minX, x);
-          bounds[pageNum].minY = Math.min(bounds[pageNum].minY, y);
-          bounds[pageNum].maxX = Math.max(bounds[pageNum].maxX, x + width);
-          bounds[pageNum].maxY = Math.max(bounds[pageNum].maxY, y + height);
-          bounds[pageNum].hasHighlights = true;
-        }
-      }
-    });
-
-    // LiquidText behavior: 
-    // - Only crop height (top/bottom), not width (left/right)
-    // - Gradual cropping based on zoom: more zoom = tighter crop until only highlights show
-    // - At minimum zoom (1.0): show full page
-    // - As zoom increases: gradually crop top/bottom until only highlights visible
-    // - When cropping, exclude gaps between highlight groups (non-highlighted text between highlights)
-    Object.keys(bounds).forEach((pageNum) => {
-      const b = bounds[pageNum];
-      if (!b.hasHighlights) return;
-
-      // Group highlights that are close together vertically (within 2% of page height)
-      // This helps identify contiguous highlight regions vs gaps
-      const GAP_THRESHOLD = 0.02; // 2% of page height
-      const rects = highlightRectsPerPage[pageNum];
-
-      // Sort rectangles by top position
-      rects.sort((a, b) => a.top - b.top);
-
-      // Group contiguous highlights
-      const highlightGroups = [];
-      let currentGroup = null;
-
-      rects.forEach((rect) => {
-        if (!currentGroup) {
-          currentGroup = { top: rect.top, bottom: rect.bottom };
-        } else {
-          // Check if this rect is close to the current group (within threshold)
-          const gap = rect.top - currentGroup.bottom;
-          if (gap <= GAP_THRESHOLD) {
-            // Extend the current group
-            currentGroup.bottom = Math.max(currentGroup.bottom, rect.bottom);
-          } else {
-            // Start a new group
-            highlightGroups.push(currentGroup);
-            currentGroup = { top: rect.top, bottom: rect.bottom };
-          }
-        }
-      });
-      if (currentGroup) {
-        highlightGroups.push(currentGroup);
-      }
-
-      // Calculate the highlight region (top and bottom bounds of all groups)
-      // But we'll use mask to exclude gaps between groups
-      const highlightTop = b.minY;
-      const highlightBottom = b.maxY;
-      const highlightHeight = highlightBottom - highlightTop;
-
-      // Calculate crop progress based on highlight view crop zoom (separate from page scale)
-      // At cropZoom 1.0: cropProgress = 0 (show full page)
-      // At cropZoom 1.5: cropProgress = 0.5 (crop halfway)
-      // At cropZoom 2.0+: cropProgress = 1.0 (crop to highlights only)
-      const minZoom = 1.0;
-      const maxZoom = 2.0; // At 2x crop zoom, fully crop to highlights
-      const cropZoom = isHighlightView ? highlightViewCropZoom : 1.0;
-      const normalizedScale = Math.max(minZoom, Math.min(cropZoom, maxZoom));
-      const cropProgress = (normalizedScale - minZoom) / (maxZoom - minZoom);
-
-      // Calculate how much to crop from top and bottom
-      // At cropProgress = 0: no crop (show full page)
-      // At cropProgress = 1: crop to highlight bounds only
-      const topCrop = highlightTop * cropProgress;
-      const bottomCrop = (1 - highlightBottom) * cropProgress;
-
-      // Calculate final visible region (only height is cropped, width stays full)
-      b.visibleTop = topCrop;
-      b.visibleBottom = 1 - bottomCrop;
-      b.visibleHeight = b.visibleBottom - b.visibleTop;
-
-      // Store highlight groups for mask generation
-      b.highlightGroups = highlightGroups;
-
-      // For clip-path: we only crop top and bottom, left and right stay at 0% and 100%
-      // But we'll also use mask-image to exclude gaps between highlight groups
-      b.clipTop = b.visibleTop * 100;
-      b.clipBottom = (1 - b.visibleBottom) * 100;
-      b.cropProgress = cropProgress; // Store crop progress for spacing calculation
-
-      // Generate mask-image gradient that shows only highlight groups (excludes gaps)
-      // Apply mask when there are multiple highlight groups (gaps between them) and we're cropping
-      if (cropProgress > 0 && highlightGroups.length > 0) {
-        // Only apply mask if there are gaps to exclude between highlight groups
-        // The mask will exclude non-highlighted text between highlight groups on the same page
-        if (highlightGroups.length > 1) {
-          // Multiple highlight groups means there are gaps between them
-          // Build a linear gradient mask that gradually excludes gaps based on crop progress
-          // At cropProgress = 0: show everything (gaps visible)
-          // At cropProgress = 1: show only highlights (gaps hidden)
-          // Strategy: Gradually shrink gaps by making them transparent as crop progress increases
-          const maskStops = [];
-
-          // Start from the top of the page
-          let currentPos = 0;
-
-          highlightGroups.forEach((group) => {
-            const groupTopPercent = group.top * 100;
-            const groupBottomPercent = group.bottom * 100;
-
-            // Calculate gap before this group
-            if (groupTopPercent > currentPos) {
-              const gapStart = currentPos;
-              const gapEnd = groupTopPercent;
-              const gapSize = gapEnd - gapStart;
-
-              // Gradually hide the gap based on crop progress
-              // At cropProgress=0: gap is fully visible (black = visible in mask)
-              // At cropProgress=1: gap is fully hidden (transparent)
-              // Smoothly shrink the visible portion from center
-              const visibleGapSize = gapSize * Math.max(0, 1 - cropProgress);
-              const visibleGapStart = gapStart + (gapSize - visibleGapSize) / 2;
-              const visibleGapEnd = visibleGapStart + visibleGapSize;
-
-              if (visibleGapSize > 0.01) {
-                // Gap is partially visible - show center portion, hide edges
-                maskStops.push(`transparent ${gapStart}%`);
-                maskStops.push(`transparent ${visibleGapStart}%`);
-                maskStops.push(`black ${visibleGapStart}%`);
-                maskStops.push(`black ${visibleGapEnd}%`);
-                maskStops.push(`transparent ${visibleGapEnd}%`);
-                maskStops.push(`transparent ${gapEnd}%`);
-              } else {
-                // Gap is fully hidden
-                maskStops.push(`transparent ${gapStart}%`);
-                maskStops.push(`transparent ${gapEnd}%`);
-              }
-            }
-
-            // Add black (fully visible) region for this highlight group
-            maskStops.push(`black ${groupTopPercent}%`);
-            maskStops.push(`black ${groupBottomPercent}%`);
-
-            currentPos = groupBottomPercent;
-          });
-
-          // Add transparent region after last group (if any)
-          if (currentPos < 100) {
-            const gapStart = currentPos;
-            const gapEnd = 100;
-            const gapSize = gapEnd - gapStart;
-            const visibleGapSize = gapSize * Math.max(0, 1 - cropProgress);
-            const visibleGapStart = gapStart + (gapSize - visibleGapSize) / 2;
-            const visibleGapEnd = visibleGapStart + visibleGapSize;
-
-            if (visibleGapSize > 0.01) {
-              // Gap is partially visible - show center portion, hide edges
-              maskStops.push(`transparent ${gapStart}%`);
-              maskStops.push(`transparent ${visibleGapStart}%`);
-              maskStops.push(`black ${visibleGapStart}%`);
-              maskStops.push(`black ${visibleGapEnd}%`);
-              maskStops.push(`transparent ${visibleGapEnd}%`);
-              maskStops.push(`transparent ${gapEnd}%`);
-            } else {
-              // Gap is fully hidden
-              maskStops.push(`transparent ${gapStart}%`);
-              maskStops.push(`transparent ${gapEnd}%`);
-            }
-          }
-
-          // Apply mask to exclude gaps gradually
-          b.maskImage = `linear-gradient(to bottom, ${maskStops.join(', ')})`;
-          // Store mask strength based on crop progress
-          b.maskStrength = cropProgress;
-        } else {
-          // Single highlight group - no gaps to exclude, clip-path handles top/bottom cropping
-          b.maskImage = null;
-          b.maskStrength = null;
-        }
-      } else {
-        b.maskImage = null;
-        b.maskStrength = null;
-      }
-    });
-
-    // Calculate overall crop progress for spacing (average of all pages with highlights)
-    const pagesWithHighlights = Object.values(bounds).filter(b => b.hasHighlights);
-    const avgCropProgress = pagesWithHighlights.length > 0
-      ? pagesWithHighlights.reduce((sum, b) => sum + (b.cropProgress || 0), 0) / pagesWithHighlights.length
-      : 0;
-
-    return { bounds, avgCropProgress };
-  }, [filteredAnnotations, isHighlightView, highlightViewCropZoom]);
 
   const liveFreehandStrokeWidth =
     drawingState?.type === 'freehand'
@@ -2861,15 +2650,10 @@ export const useDocumentWorkspaceController = () => {
         const delta = -ev.deltaY;
         const step = delta > 0 ? 0.05 : -0.05;
 
-        if (isHighlightView) {
-          // In highlight view: control crop zoom, not page scale
-          setHighlightViewCropZoom(prev => clamp(+(prev + step).toFixed(2), 1.0, 2.5));
-        } else {
-          // Normal mode: control page scale
-          setPrimaryScale(prev => clamp(+(prev + step).toFixed(2), 0.5, 3));
-          // Re-measure after zoom
-          setTimeout(measurePagePositions, 50);
-        }
+        // Normal mode: control page scale
+        setPrimaryScale(prev => clamp(+(prev + step).toFixed(2), 0.5, 3));
+        // Re-measure after zoom
+        setTimeout(measurePagePositions, 50);
       }
     };
 
@@ -2905,7 +2689,7 @@ export const useDocumentWorkspaceController = () => {
       wrapper.removeEventListener('pointerup', onPointerUp);
       wrapper.removeEventListener('pointercancel', onPointerUp);
     };
-  }, [measurePagePositions, isHighlightView]);
+  }, [measurePagePositions]);
 
   // ---------- small helpers ----------
   const handleDeleteAnnotation = useCallback((id) => {
@@ -3071,7 +2855,6 @@ export const useDocumentWorkspaceController = () => {
       } else {
         setActiveTool('freehand');
         dismissFreehandPalette();
-        setIsHighlightView(false); // Disable crop view when switching tool
       }
       return;
     }
@@ -3091,17 +2874,11 @@ export const useDocumentWorkspaceController = () => {
     }
     if (toolId === 'comment') {
       setActiveTool('comment');
-      setIsHighlightView(false); // Disable crop view when switching tool
       return;
     }
     
-    // Disable crop view when switching to any tool other than select (if it's already select)
-    if (toolId !== 'select') {
-      setIsHighlightView(false);
-    }
-    
     setActiveTool(toolId);
-  }, [activeTool, applyLineAnnotation, dismissFreehandPalette, setIsHighlightView]);
+  }, [activeTool, applyLineAnnotation, dismissFreehandPalette]);
 
   // ---------- Global pointer handlers for smooth dragging ----------
   useEffect(() => {
@@ -3190,10 +2967,6 @@ export const useDocumentWorkspaceController = () => {
     setIsFreehandCommentMode,
     searchTerm,
     setSearchTerm,
-    isHighlightView,
-    setIsHighlightView,
-    highlightViewCropZoom,
-    setHighlightViewCropZoom,
     isTablet,
     isSearchBarOpen,
     toggleSearchBar: handleToggleSearchBar,
@@ -3212,8 +2985,6 @@ export const useDocumentWorkspaceController = () => {
     dismissFreehandPalette,
     isFreehandCommentMode,
     searchTerm,
-    isHighlightView,
-    highlightViewCropZoom,
     isTablet,
     isSearchBarOpen,
     handleToggleSearchBar,
@@ -3442,9 +3213,6 @@ export const useDocumentWorkspaceController = () => {
     handleStartDraggingBookmark,
     bookmarks,
     documentRightPadding,
-    isHighlightView,
-    highlightBoundsPerPage,
-    highlightViewCropZoom,
   }), [
     numPages,
     onDocumentLoadSuccess,
@@ -3468,9 +3236,6 @@ export const useDocumentWorkspaceController = () => {
     handleStartDraggingBookmark,
     bookmarks,
     documentRightPadding,
-    isHighlightView,
-    highlightBoundsPerPage,
-    highlightViewCropZoom,
   ]);
 
   // ---------- AUTO-SCROLL TO ITEM ----------

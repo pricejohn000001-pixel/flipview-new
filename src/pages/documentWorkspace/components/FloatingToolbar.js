@@ -1,6 +1,5 @@
 import React, { useEffect, useRef } from 'react';
 import {
-  MdCrop,
   MdZoomIn,
   MdZoomOut,
   MdSearch,
@@ -30,8 +29,6 @@ const FloatingToolbar = ({
   onBrushOpacityChange,
   isFreehandCommentMode = false,
   onToggleFreehandCommentMode,
-  isHighlightView = false,
-  onToggleHighlightView,
   primaryScale,
   onManualZoom,
   onSearchClick,
@@ -128,14 +125,6 @@ const FloatingToolbar = ({
               </div>
             </div>
             <div className={styles.toolbarSubGroup}>
-              <button 
-                type="button" 
-                className={`${styles.toolIconButton} ${isHighlightView ? styles.toolIconButtonActive : ''}`} 
-                onClick={onToggleHighlightView} 
-                title="Highlight View (crop to highlights)"
-              >
-                <MdCrop size={18} />
-              </button>
               <button
                 type="button"
                 className={`${styles.toolIconButton} ${isSearchOpen ? styles.toolIconButtonActive : ''}`}
