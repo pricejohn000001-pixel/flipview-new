@@ -367,24 +367,72 @@ const useOcr = ({ pdfProxyRef }) => {
             return a.y - b.y;
           });
 
+          // Group items into lines and calculate line bounding boxes
+          const lines = [];
+          let currentLine = [inside[0]];
+          let lineMinX = inside[0].x;
+          let lineMaxX = inside[0].x + inside[0].w;
+          let lineMinY = inside[0].y;
+          let lineMaxY = inside[0].y + inside[0].h;
+
+          for (let i = 1; i < inside.length; i++) {
+            const item = inside[i];
+            const prevItem = inside[i - 1];
+            const dy = Math.abs(item.y - prevItem.y);
+
+            if (dy < (item.h || 10) * 0.8) {
+              // Same line
+              currentLine.push(item);
+              lineMinX = Math.min(lineMinX, item.x);
+              lineMaxX = Math.max(lineMaxX, item.x + item.w);
+              lineMinY = Math.min(lineMinY, item.y);
+              lineMaxY = Math.max(lineMaxY, item.y + item.h);
+            } else {
+              // New line - save previous line bounds
+              lines.push({
+                items: [...currentLine],
+                bounds: {
+                  x: lineMinX / width,
+                  y: lineMinY / height,
+                  width: (lineMaxX - lineMinX) / width,
+                  height: (lineMaxY - lineMinY) / height,
+                }
+              });
+              // Start new line
+              currentLine = [item];
+              lineMinX = item.x;
+              lineMaxX = item.x + item.w;
+              lineMinY = item.y;
+              lineMaxY = item.y + item.h;
+            }
+          }
+          // Don't forget the last line
+          if (currentLine.length > 0) {
+            lines.push({
+              items: [...currentLine],
+              bounds: {
+                x: lineMinX / width,
+                y: lineMinY / height,
+                width: (lineMaxX - lineMinX) / width,
+                height: (lineMaxY - lineMinY) / height,
+              }
+            });
+          }
+
           // Join text
           let text = '';
-          let lastY = inside[0].y;
-
-          inside.forEach((item, idx) => {
-            if (idx > 0) {
-              const dy = item.y - lastY;
-              if (dy > item.h * 1.5) {
-                text += '\n'; // New paragraph/line
-              } else {
-                text += ' ';
-              }
-            }
-            text += item.str;
-            lastY = item.y;
+          lines.forEach((line, idx) => {
+            if (idx > 0) text += '\n';
+            line.items.forEach((item, itemIdx) => {
+              if (itemIdx > 0) text += ' ';
+              text += item.str;
+            });
           });
 
-          return { text: text.trim(), confidence: 100 };
+          // Return line rectangles for per-line highlighting
+          const lineRects = lines.map(l => l.bounds);
+
+          return { text: text.trim(), confidence: 100, lineRects };
         }
       }
     } catch (e) {
@@ -413,7 +461,64 @@ const useOcr = ({ pdfProxyRef }) => {
         { hocr: true, tsv: true }
       );
 
-      return { text: data.text?.trim() || '', confidence: Math.round(data.confidence || 0) };
+      // Extract line-level rectangles from TSV data for per-line highlighting
+      let lineRects = [];
+      if (data.tsv) {
+        const lines = data.tsv.split('\n').slice(1); // Skip header
+        const lineMap = new Map(); // Group by line_num
+
+        lines.forEach(row => {
+          const cols = row.split('\t');
+          if (cols.length >= 12) {
+            const level = parseInt(cols[0], 10);
+            const pageNum = parseInt(cols[1], 10);
+            const blockNum = parseInt(cols[2], 10);
+            const parNum = parseInt(cols[3], 10);
+            const lineNum = parseInt(cols[4], 10);
+            const wordNum = parseInt(cols[5], 10);
+            const left = parseInt(cols[6], 10);
+            const top = parseInt(cols[7], 10);
+            const width = parseInt(cols[8], 10);
+            const height = parseInt(cols[9], 10);
+
+            // Level 4 = text line
+            if (level === 4 && !isNaN(left) && !isNaN(top) && width > 0 && height > 0) {
+              const key = `${blockNum}-${parNum}-${lineNum}`;
+              if (!lineMap.has(key)) {
+                lineMap.set(key, {
+                  minX: left,
+                  minY: top,
+                  maxX: left + width,
+                  maxY: top + height,
+                });
+              } else {
+                const bounds = lineMap.get(key);
+                bounds.minX = Math.min(bounds.minX, left);
+                bounds.minY = Math.min(bounds.minY, top);
+                bounds.maxX = Math.max(bounds.maxX, left + width);
+                bounds.maxY = Math.max(bounds.maxY, top + height);
+              }
+            }
+          }
+        });
+
+        // Convert to normalized rectangles relative to clipRect
+        // TSV coordinates are relative to the cropped image (w x h)
+        lineRects = Array.from(lineMap.values())
+          .sort((a, b) => a.minY - b.minY) // Sort by vertical position
+          .map(bounds => ({
+            x: clipRect.x + (bounds.minX / w) * clipRect.width,
+            y: clipRect.y + (bounds.minY / h) * clipRect.height,
+            width: ((bounds.maxX - bounds.minX) / w) * clipRect.width,
+            height: ((bounds.maxY - bounds.minY) / h) * clipRect.height,
+          }));
+      }
+
+      return {
+        text: data.text?.trim() || '',
+        confidence: Math.round(data.confidence || 0),
+        lineRects: lineRects.length > 0 ? lineRects : undefined,
+      };
     } catch (e) {
       console.error(e);
       return null;

@@ -73,7 +73,7 @@ const ClippingsPanel = ({
                   <p style={{ whiteSpace: 'pre-wrap', maxHeight: 96, overflow: 'auto' }}>{clip.content}</p>
                 )}
                 <div className={styles.clippingActions}>
-                  <button type="button" className={styles.linkButton} onClick={() => onJumpToPage(getPrimaryPageFromSource(clip.sourcePage))}>Jump</button>
+                  <button type="button" className={styles.linkButton} onClick={() => onJumpToPage(getPrimaryPageFromSource(clip.sourcePage), clip.id)}>Jump</button>
                   <button type="button" className={styles.linkButton} onClick={() => onReorderClipping(clip.id, -1)}>Up</button>
                   <button type="button" className={styles.linkButton} onClick={() => onReorderClipping(clip.id, 1)}>Down</button>
                   <button type="button" className={styles.linkButton} onClick={() => onRemoveClipping(clip.id)}>Remove</button>

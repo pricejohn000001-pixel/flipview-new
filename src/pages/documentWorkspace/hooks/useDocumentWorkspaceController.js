@@ -158,7 +158,9 @@ export const useDocumentWorkspaceController = () => {
   const [savedAnnotationIds, setSavedAnnotationIds] = useState(new Set());
   const autoSaveTimerRef = useRef(null);
   const [annotationFilters, setAnnotationFilters] = useState(() => ANNOTATION_TYPES.reduce((acc, type) => ({ ...acc, [type]: true }), {}));
-  const [activeTool, setActiveTool] = useState('select');
+  const [activeTool, setActiveTool] = useState(() => {
+    return sessionStorage.getItem('activeTool') || 'select';
+  });
   const [activeColor, setActiveColor] = useState(COLOR_OPTIONS[0]);
   const [activeBrushSize, setActiveBrushSize] = useState(DEFAULT_BRUSH_SIZE);
   const [activeBrushOpacity, setActiveBrushOpacity] = useState(DEFAULT_BRUSH_OPACITY);
@@ -177,7 +179,7 @@ export const useDocumentWorkspaceController = () => {
 
   // drawing / clippings / search
   const [drawingState, setDrawingState] = useState(null);
-  const [clippings, setClippings] = useState([]); // each clipping: { id, content, createdAt, sourcePage, sourceRect? {x,y,width,height} (normalized) }
+  const [clippings, setClippings] = useState([]); // each clipping: { id, content, createdAt, sourcePage, sourceRect? {x,y,width,height} (normalized), sourceRects?: [{x,y,width,height}] }
   const [selectedClippings, setSelectedClippings] = useState([]);
   const [searchTerm, setSearchTerm] = useState('');
   const [searchResults, setSearchResults] = useState([]);
@@ -388,23 +390,34 @@ export const useDocumentWorkspaceController = () => {
   const handleExtractClipFromArea = useCallback((clipRect, pageNumber) => {
     extractTextFromArea(clipRect, pageNumber).then((result) => {
       if (!result) return;
+
       const newClip = {
         id: createClippingId(),
         content: result.text,
         createdAt: new Date().toISOString(),
         sourcePage: pageNumber,
-        sourceRect: clipRect,
         confidence: result.confidence,
         source: 'OCR',
         color: activeColor,
       };
+
+      // Use per-line rectangles if available for better highlighting
+      if (result.lineRects && result.lineRects.length > 0) {
+        newClip.sourceRects = result.lineRects;
+      } else {
+        // Fall back to single rectangle
+        newClip.sourceRect = clipRect;
+      }
+
       setClippings((prev) => [newClip, ...prev]);
       setSelectedClippings([]);
       setActiveTool('select');
-      const normalizedY = numPages ? clamp(pageNumber / numPages, 0.08, 0.9) : undefined;
-      addClipToWorkspace(newClip.id, { preferredY: normalizedY });
+
+      // Use smart placement based on visible center for the workspace item
+      const visibleCenter = getVisibleWorkspaceCenter(workspacePan, workspaceZoom);
+      addClipToWorkspace(newClip.id, { preferredX: visibleCenter.x, preferredY: visibleCenter.y });
     });
-  }, [extractTextFromArea, numPages, addClipToWorkspace]);
+  }, [extractTextFromArea, numPages, addClipToWorkspace, workspacePan, workspaceZoom, activeColor]);
 
   const draggingAnnotationId = useRef(null);
   const draggingAnnotationMetaRef = useRef({ offsetX: 0, offsetY: 0, pageNumber: 1 });
@@ -426,6 +439,11 @@ export const useDocumentWorkspaceController = () => {
       dismissFreehandPalette();
     }
   }, [activeTool, dismissFreehandPalette]);
+
+  // Save activeTool to sessionStorage whenever it changes
+  useEffect(() => {
+    sessionStorage.setItem('activeTool', activeTool);
+  }, [activeTool]);
 
   useEffect(() => {
     if (!isWorkspaceResizing) return;
@@ -1089,12 +1107,8 @@ export const useDocumentWorkspaceController = () => {
           // Use smart placement based on visible center
           const visibleCenter = getVisibleWorkspaceCenter(workspacePan, workspaceZoom);
 
-          // For comments created from text, use the selected text's vertical position as the preferred drop spot
-          const preferredY = sourceRect ? sourceRect.y : null;
-          const preferredPosition = preferredY !== null ? { x: visibleCenter.x, y: preferredY } : null;
-
           // Use smart positioning to find a free spot
-          const pos = findSmartPosition(visibleCenter, prev, workspaceZoom, preferredPosition);
+          const pos = findSmartPosition(visibleCenter, prev, workspaceZoom);
 
           const item = {
             id: createWorkspaceItemId(),
@@ -1777,9 +1791,11 @@ export const useDocumentWorkspaceController = () => {
     sel.removeAllRanges();
     currentSelectionRef.current = { text: '', range: null, pageNumber: null };
     setSelectionMenu(null);
-    const normalizedY = numPages ? clamp(pageNum / numPages, 0.08, 0.9) : undefined;
-    addClipToWorkspace(newClip.id, { preferredY: normalizedY });
-  }, [ocrResults, numPages, addClipToWorkspace]);
+    
+    // Use smart placement based on visible center for the workspace item
+    const visibleCenter = getVisibleWorkspaceCenter(workspacePan, workspaceZoom);
+    addClipToWorkspace(newClip.id, { preferredX: visibleCenter.x, preferredY: visibleCenter.y });
+  }, [ocrResults, numPages, addClipToWorkspace, workspacePan, workspaceZoom, activeColor]);
 
   const toggleClippingSelection = useCallback((id) => {
     setSelectedClippings((prev) => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]);
@@ -2623,8 +2639,19 @@ export const useDocumentWorkspaceController = () => {
     // Single clip - connect to its source page (only if visible)
     if (itemType === 'clip' && source) {
       const pageNum = getPrimaryPageFromSource(source.sourcePage);
-      // Fallback: if sourceRect is missing (e.g. from flat API), try to construct it or assume it's valid if we just fixed the API transform
-      if (!source.sourceRect && source.source_rect_x !== undefined) {
+      // Use sourceRects if available (per-line highlighting), otherwise fall back to sourceRect
+      const effectiveRect = (source.sourceRects && source.sourceRects.length > 0)
+        ? {
+            // Compute bounding box of all line rectangles
+            x: Math.min(...source.sourceRects.map(r => r.x)),
+            y: Math.min(...source.sourceRects.map(r => r.y)),
+            width: Math.max(...source.sourceRects.map(r => r.x + r.width)) - Math.min(...source.sourceRects.map(r => r.x)),
+            height: Math.max(...source.sourceRects.map(r => r.y + r.height)) - Math.min(...source.sourceRects.map(r => r.y)),
+          }
+        : source.sourceRect;
+
+      // Fallback: if sourceRect is missing (e.g. from flat API), try to construct it
+      if (!effectiveRect && source.source_rect_x !== undefined) {
         source.sourceRect = {
           x: parseFloat(source.source_rect_x),
           y: parseFloat(source.source_rect_y),
@@ -2632,7 +2659,7 @@ export const useDocumentWorkspaceController = () => {
           height: parseFloat(source.source_rect_height),
         };
       }
-      const single = buildConnectorForPage(source.sourceRect, pageNum);
+      const single = buildConnectorForPage(effectiveRect || source.sourceRect, pageNum);
       return single ? [single] : [];
     }
 
@@ -2643,6 +2670,18 @@ export const useDocumentWorkspaceController = () => {
   const handleWorkspaceItemClick = useCallback((item) => {
     const itemType = getWorkspaceItemType(item);
     const sourceId = getWorkspaceItemSourceId(item);
+
+    // Also move the workspace to this item
+    const containerEl = workspaceContainerRef.current;
+    if (containerEl) {
+      const targetPanX = -(item.x * 6000 - 3000) * workspaceZoom;
+      const targetPanY = -(item.y * 6000 - 3000) * workspaceZoom;
+      setWorkspacePan({ x: targetPanX, y: targetPanY });
+
+      // Pulse the card (blip)
+      setTempHighlightItemId(item.id);
+      setTimeout(() => setTempHighlightItemId(null), 2000);
+    }
 
     if (itemType === 'comment') {
       const comment = workspaceComments.find((c) => c.id === sourceId);
@@ -2701,14 +2740,27 @@ export const useDocumentWorkspaceController = () => {
       }, 100);
     }
 
-    const highlightRect = targetSegment?.sourceRect || clip.sourceRect;
+    // Use sourceRects if available, otherwise fall back to sourceRect
+    let highlightRect = targetSegment?.sourceRect || clip.sourceRect;
+    const sourceRects = targetSegment?.sourceRects || clip.sourceRects;
+
+    // If we have per-line rectangles, compute bounding box
+    if (!highlightRect && sourceRects && sourceRects.length > 0) {
+      highlightRect = {
+        x: Math.min(...sourceRects.map(r => r.x)),
+        y: Math.min(...sourceRects.map(r => r.y)),
+        width: Math.max(...sourceRects.map(r => r.x + r.width)) - Math.min(...sourceRects.map(r => r.x)),
+        height: Math.max(...sourceRects.map(r => r.y + r.height)) - Math.min(...sourceRects.map(r => r.y)),
+      };
+    }
+
     if (highlightRect && targetPage) {
       pulseTemporaryHighlight({
         pageNumber: targetPage,
         position: highlightRect,
       });
     }
-  }, [clippings, workspaceComments, pulseTemporaryHighlight]);
+  }, [clippings, workspaceComments, pulseTemporaryHighlight, workspaceZoom, setWorkspacePan, setTempHighlightItemId]);
 
   // ---------- PAGE POSITION TRACKING & VIEWPORT STATE ----------
 
@@ -2886,9 +2938,39 @@ export const useDocumentWorkspaceController = () => {
   }, [workspaceWidth]);
 
   const handleManualZoom = useCallback((direction) => {
+    const wrapper = viewerZoomWrapperRef.current;
+    // Save current scroll position and dimensions before zoom
+    const prevScrollLeft = wrapper?.scrollLeft ?? 0;
+    const prevScrollTop = wrapper?.scrollTop ?? 0;
+    const prevClientWidth = wrapper?.clientWidth ?? 0;
+    const prevClientHeight = wrapper?.clientHeight ?? 0;
+    const prevScrollWidth = wrapper?.scrollWidth ?? 0;
+    const prevScrollHeight = wrapper?.scrollHeight ?? 0;
+
+    // Calculate the center point of the visible viewport (as ratio of scrollable area)
+    const centerXRatio = prevScrollWidth > 0 ? (prevScrollLeft + prevClientWidth / 2) / prevScrollWidth : 0.5;
+    const centerYRatio = prevScrollHeight > 0 ? (prevScrollTop + prevClientHeight / 2) / prevScrollHeight : 0.5;
+
     setPrimaryScale(prev => {
       const delta = direction === 'in' ? 0.05 : -0.05;
       return clamp(+(prev + delta).toFixed(2), 0.5, 3);
+    });
+
+    // After state update, restore scroll position proportionally
+    requestAnimationFrame(() => {
+      if (!wrapper) return;
+      // Get new dimensions after zoom
+      const newScrollWidth = wrapper.scrollWidth;
+      const newScrollHeight = wrapper.scrollHeight;
+      const newClientWidth = wrapper.clientWidth;
+      const newClientHeight = wrapper.clientHeight;
+
+      // Calculate new scroll position to maintain the same center point
+      const newScrollLeft = centerXRatio * newScrollWidth - newClientWidth / 2;
+      const newScrollTop = centerYRatio * newScrollHeight - newClientHeight / 2;
+
+      wrapper.scrollLeft = Math.max(0, Math.min(newScrollLeft, newScrollWidth - newClientWidth));
+      wrapper.scrollTop = Math.max(0, Math.min(newScrollTop, newScrollHeight - newClientHeight));
     });
   }, []);
 
@@ -2989,6 +3071,7 @@ export const useDocumentWorkspaceController = () => {
       } else {
         setActiveTool('freehand');
         dismissFreehandPalette();
+        setIsHighlightView(false); // Disable crop view when switching tool
       }
       return;
     }
@@ -3008,10 +3091,17 @@ export const useDocumentWorkspaceController = () => {
     }
     if (toolId === 'comment') {
       setActiveTool('comment');
+      setIsHighlightView(false); // Disable crop view when switching tool
       return;
     }
+    
+    // Disable crop view when switching to any tool other than select (if it's already select)
+    if (toolId !== 'select') {
+      setIsHighlightView(false);
+    }
+    
     setActiveTool(toolId);
-  }, [activeTool, applyLineAnnotation, dismissFreehandPalette]);
+  }, [activeTool, applyLineAnnotation, dismissFreehandPalette, setIsHighlightView]);
 
   // ---------- Global pointer handlers for smooth dragging ----------
   useEffect(() => {
@@ -3140,7 +3230,16 @@ export const useDocumentWorkspaceController = () => {
     reorder: handleReorderClipping,
     remove: handleRemoveClipping,
     uncombine: handleUncombineClipping,
-    jumpToPage: setPrimaryPage,
+    clickItem: handleWorkspaceItemClick,
+    jumpToPage: (pageNumber, clipId) => {
+      setPrimaryPage(pageNumber);
+      if (clipId) {
+        const item = workspaceItems.find(it => it.sourceId === clipId);
+        if (item) {
+          handleWorkspaceItemClick(item);
+        }
+      }
+    },
     resolvePrimaryPage: getPrimaryPageFromSource,
     isCollapsed: isClippingsPanelCollapsed,
     toggleCollapse: handleToggleClippingsPanel,
@@ -3154,6 +3253,7 @@ export const useDocumentWorkspaceController = () => {
     handleReorderClipping,
     handleRemoveClipping,
     handleUncombineClipping,
+    handleWorkspaceItemClick,
     setPrimaryPage,
     isClippingsPanelCollapsed,
     handleToggleClippingsPanel,
@@ -3226,6 +3326,12 @@ export const useDocumentWorkspaceController = () => {
     pdfOutlines,
     onOutlineJump: handleOutlineJump,
     workspaceComments,
+    onCommentJump: (commentId) => {
+      const item = workspaceItems.find(it => it.sourceId === commentId && getWorkspaceItemType(it) === 'comment');
+      if (item) {
+        handleWorkspaceItemClick(item);
+      }
+    },
   }), [
     isRightPanelCollapsed,
     handleToggleRightPanel,
@@ -3241,6 +3347,8 @@ export const useDocumentWorkspaceController = () => {
     pdfOutlines,
     handleOutlineJump,
     workspaceComments,
+    workspaceItems,
+    handleWorkspaceItemClick,
   ]);
 
   const workspaceApi = useMemo(() => ({

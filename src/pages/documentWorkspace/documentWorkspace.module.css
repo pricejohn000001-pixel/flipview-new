@@ -2622,3 +2622,14 @@
   transform: none;
   box-shadow: 0 4px 12px rgba(212, 175, 55, 0.2);
 }
+
+/* ============================================================
+   CLIPPING UI - GOLDEN THEME
+   ============================================================ */
+
+.clipLabel {
+  font-family: 'Inter', sans-serif;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  font-weight: 600;
+}

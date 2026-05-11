@@ -90,7 +90,7 @@ const DocumentPane = () => {
     () => {
       // Map clippings to highlight annotations
       const clippingHighlights = clippings
-        .filter(c => c.sourceRect && c.sourcePage)
+        .filter(c => c.sourcePage && (c.sourceRect || (c.sourceRects && c.sourceRects.length > 0)))
         .map(c => ({
           id: `clip-highlight-${c.id}`,
           type: 'highlight',
@@ -281,7 +281,10 @@ const DocumentPane = () => {
             {Array.from({ length: numPages || 0 }, (_, index) => {
               const pageNumber = index + 1;
               const hasPageHighlights = highlightBoundsPerPage?.bounds?.[pageNumber]?.hasHighlights;
-              if (isHighlightView && !hasPageHighlights) {
+              // Only hide pages in highlight view if there are actually highlights in the document
+              // If no highlights exist at all, show all pages to prevent PDF from vanishing
+              const hasAnyHighlightsInDocument = highlightBoundsPerPage?.avgCropProgress > 0;
+              if (isHighlightView && !hasPageHighlights && hasAnyHighlightsInDocument) {
                 return null;
               }
 
@@ -477,17 +480,29 @@ const DocumentPane = () => {
                           {drawingState?.type === 'clip' &&
                             drawingState.pageNumber === pageNumber &&
                             drawingState.start && (
-                              <rect
-                                className={styles.highlightRect}
-                                x={`${Math.min(drawingState.lastPoint?.x || drawingState.start.x, drawingState.start.x) * 100}%`}
-                                y={`${Math.min(drawingState.lastPoint?.y || drawingState.start.y, drawingState.start.y) * 100}%`}
-                                width={`${Math.abs((drawingState.lastPoint?.x || drawingState.start.x) - drawingState.start.x) * 100}%`}
-                                height={`${Math.abs((drawingState.lastPoint?.y || drawingState.start.y) - drawingState.start.y) * 100}%`}
-                                fill="rgba(59, 130, 246, 0.2)"
-                                stroke="rgba(59, 130, 246, 0.8)"
-                                strokeWidth="2"
-                                strokeDasharray="5,5"
-                              />
+                              <g>
+                                {/* Background fill */}
+                                <rect
+                                  x={`${Math.min(drawingState.lastPoint?.x || drawingState.start.x, drawingState.start.x) * 100}%`}
+                                  y={`${Math.min(drawingState.lastPoint?.y || drawingState.start.y, drawingState.start.y) * 100}%`}
+                                  width={`${Math.abs((drawingState.lastPoint?.x || drawingState.start.x) - drawingState.start.x) * 100}%`}
+                                  height={`${Math.abs((drawingState.lastPoint?.y || drawingState.start.y) - drawingState.start.y) * 100}%`}
+                                  fill="rgba(212, 175, 55, 0.15)"
+                                />
+                                
+                                {/* Dashed border */}
+                                <rect
+                                  className={styles.clipBorder}
+                                  x={`${Math.min(drawingState.lastPoint?.x || drawingState.start.x, drawingState.start.x) * 100}%`}
+                                  y={`${Math.min(drawingState.lastPoint?.y || drawingState.start.y, drawingState.start.y) * 100}%`}
+                                  width={`${Math.abs((drawingState.lastPoint?.x || drawingState.start.x) - drawingState.start.x) * 100}%`}
+                                  height={`${Math.abs((drawingState.lastPoint?.y || drawingState.start.y) - drawingState.start.y) * 100}%`}
+                                  fill="none"
+                                  stroke="#d4af37"
+                                  strokeWidth="1"
+                                  strokeDasharray="5,5"
+                                />
+                              </g>
                             )}
                         </svg>
 

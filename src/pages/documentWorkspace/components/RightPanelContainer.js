@@ -1,6 +1,6 @@
 import React from 'react';
 import RightPanel from './RightPanel';
-import { useRightPanelApi } from '../context/DocumentWorkspaceContext';
+import { useRightPanelApi, useClippingsApi, useWorkspaceApi } from '../context/DocumentWorkspaceContext';
 
 const RightPanelContainer = () => {
   const {
@@ -18,9 +18,21 @@ const RightPanelContainer = () => {
     pdfOutlines,
     onOutlineJump,
     workspaceComments,
+    onCommentJump,
     pageRefs,
     viewerZoomWrapperRef,
   } = useRightPanelApi();
+
+  const {
+    items: clippings,
+    remove: onRemoveClipping,
+    clickItem: onClippingJump,
+    resolvePrimaryPage: getPrimaryPageFromSource,
+  } = useClippingsApi();
+
+  const {
+    items: workspaceItems,
+  } = useWorkspaceApi();
 
   return (
     <RightPanel
@@ -38,6 +50,12 @@ const RightPanelContainer = () => {
       pdfOutlines={pdfOutlines}
       onOutlineJump={onOutlineJump}
       workspaceComments={workspaceComments}
+      onCommentJump={onCommentJump}
+      clippings={clippings}
+      onClippingJump={onClippingJump}
+      onRemoveClipping={onRemoveClipping}
+      getPrimaryPageFromSource={getPrimaryPageFromSource}
+      workspaceItems={workspaceItems}
       pageRefs={pageRefs}
       viewerZoomWrapperRef={viewerZoomWrapperRef}
     />

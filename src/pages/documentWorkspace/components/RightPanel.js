@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { MdChevronLeft, MdChevronRight, MdBookmark, MdChatBubble, MdClose, MdArrowRight, MdChat, MdAccessTime, MdFormatQuote } from 'react-icons/md';
+import { MdChevronLeft, MdChevronRight, MdBookmark, MdChatBubble, MdClose, MdArrowRight, MdChat, MdAccessTime, MdFormatQuote, MdContentCut } from 'react-icons/md';
 import styles from '../documentWorkspace.module.css';
 
 const OutlineItem = ({ outline, onJump, depth = 0 }) => {
@@ -96,6 +96,12 @@ const RightPanel = ({
   pdfOutlines,
   onOutlineJump,
   workspaceComments,
+  onCommentJump,
+  clippings,
+  onClippingJump,
+  onRemoveClipping,
+  getPrimaryPageFromSource,
+  workspaceItems,
   pageRefs,
   viewerZoomWrapperRef,
 }) => {
@@ -132,11 +138,25 @@ const RightPanel = ({
   };
 
   const handleCommentClick = (comment) => {
+    if (comment.id && onCommentJump) {
+      onCommentJump(comment.id);
+    }
     onAnnotationJump(comment);
   };
 
   const handleOutlineClick = (outline) => {
     onOutlineJump(outline);
+  };
+
+  const handleClippingClick = (clip) => {
+    // Find the workspace item that corresponds to this clip
+    const wsItem = workspaceItems?.find((item) => item.sourceId === clip.id && item.type === 'clip');
+    if (wsItem) {
+      onClippingJump(wsItem);
+    } else {
+      // Fallback: try passing a synthetic workspace item
+      onClippingJump({ id: `ws-item-clip-${clip.id}`, type: 'clip', sourceId: clip.id });
+    }
   };
 
   return (
@@ -159,13 +179,21 @@ const RightPanel = ({
           >
             <MdChatBubble size={22} />
           </button>
+          <button
+            type="button"
+            className={`${styles.navIconButton} ${activePanel === 'clippings' ? styles.navIconButtonActive : ''}`}
+            onClick={() => handleNavIconClick('clippings')}
+            title="Clips"
+          >
+            <MdContentCut size={22} />
+          </button>
         </div>
       ) : (
         <>
           <div className={styles.panelHeader}>
             <div className={styles.panelHeaderContent}>
               <h2 className={styles.panelTitle}>
-                {activePanel === 'bookmarks' ? 'Bookmarks' : activePanel === 'comments' ? 'Comments' : 'Navigation'}
+                {activePanel === 'bookmarks' ? 'Bookmarks' : activePanel === 'comments' ? 'Comments' : activePanel === 'clippings' ? 'All Clips' : 'Navigation'}
               </h2>
               <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
                 <button
@@ -183,6 +211,14 @@ const RightPanel = ({
                   title="Comments"
                 >
                   <MdChatBubble size={18} />
+                </button>
+                <button
+                  type="button"
+                  className={`${styles.panelIconButton} ${activePanel === 'clippings' ? styles.panelIconButtonActive : ''}`}
+                  onClick={() => setActivePanel('clippings')}
+                  title="Clips"
+                >
+                  <MdContentCut size={18} />
                 </button>
                 <button type="button" className={styles.panelClose} onClick={onToggleCollapse} title="Close panel">
                   <MdClose size={20} />
@@ -315,10 +351,72 @@ const RightPanel = ({
               </>
             )}
 
+            {/* ── CLIPS PANEL ── */}
+            {activePanel === 'clippings' && (
+              <>
+                {clippings.length === 0 ? (
+                  <div className={styles.emptyState}>
+                    No clips yet. Use the "Clip Area" tool or select text and click "Create clipping".
+                  </div>
+                ) : (
+                  <div className={styles.annotationList}>
+                    <div className={styles.navSectionLabel}>All Clips ({clippings.length})</div>
+                    {clippings.map((clip) => (
+                      <div
+                        key={clip.id}
+                        className={styles.annotationCard}
+                        style={{ cursor: 'pointer' }}
+                        onClick={() => handleClippingClick(clip)}
+                      >
+                        <div className={styles.annotationTitle}>
+                          <span style={{ color: clip.color || '#d4af37' }}>
+                            <MdContentCut size={14} style={{ marginRight: 4 }} />
+                            Clip
+                          </span>
+                          <span style={{ fontSize: '12px', color: '#94a3b8', fontWeight: 500 }}>
+                            Page {clip.segments
+                              ? Array.from(new Set(clip.segments.map(seg => getPrimaryPageFromSource(seg.sourcePage)))).join(', ')
+                              : getPrimaryPageFromSource(clip.sourcePage)}
+                          </span>
+                        </div>
+                        {clip.segments ? (
+                          <div style={{ margin: '8px 0' }}>
+                            {clip.segments.map(seg => (
+                              <p key={seg.id} style={{ margin: '4px 0', fontSize: '12px', color: '#475569', lineHeight: 1.4 }}>
+                                <strong>{seg.label}:</strong> {seg.content.substring(0, 100)}{seg.content.length > 100 ? '…' : ''}
+                              </p>
+                            ))}
+                          </div>
+                        ) : (
+                          <p style={{ margin: '8px 0', fontSize: '12px', color: '#475569', lineHeight: 1.5, whiteSpace: 'pre-wrap' }}>
+                            {clip.content?.substring(0, 150)}{clip.content?.length > 150 ? '…' : ''}
+                          </p>
+                        )}
+                        <div className={styles.annotationCardMeta}>
+                          <span>
+                            {clip.createdAt ? new Date(clip.createdAt).toLocaleDateString() : ''}
+                          </span>
+                          <button
+                            type="button"
+                            className={styles.linkButton}
+                            style={{ color: '#ef4444', fontSize: '11px' }}
+                            onClick={(e) => { e.stopPropagation(); onRemoveClipping(clip.id); }}
+                          >
+                            Remove
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </>
+            )}
+
             {!activePanel && (
               <div className={styles.emptyState}>
-                Select <MdBookmark size={13} style={{ verticalAlign: 'middle' }} /> or{' '}
-                <MdChatBubble size={13} style={{ verticalAlign: 'middle' }} /> above to navigate
+                Select <MdBookmark size={13} style={{ verticalAlign: 'middle' }} />,{' '}
+                <MdChatBubble size={13} style={{ verticalAlign: 'middle' }} />, or{' '}
+                <MdContentCut size={13} style={{ verticalAlign: 'middle' }} /> above to navigate
               </div>
             )}
           </div>

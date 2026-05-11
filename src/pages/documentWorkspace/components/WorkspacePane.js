@@ -231,26 +231,30 @@ const WorkspacePane = ({
                 }}
                 onPointerDown={(ev) => {
                   startMoveWorkspaceItem(ev, item);
-                  if (itemType === 'clip' && clip) {
-                    pointerMetaRef.current[item.id] = {
-                      x: ev.clientX,
-                      y: ev.clientY,
-                      time: ev.timeStamp,
-                    };
-                  }
+                  pointerMetaRef.current[item.id] = {
+                    x: ev.clientX,
+                    y: ev.clientY,
+                    time: ev.timeStamp,
+                  };
                 }}
                 onClick={(ev) => {
                   const meta = pointerMetaRef.current[item.id];
                   pointerMetaRef.current[item.id] = undefined;
 
-                  if (itemType === 'clip' && clip) {
-                    // Ignore double-clicks; those are handled separately
-                    if (ev.detail && ev.detail > 1) {
+                  if (meta) {
+                    const duration = ev.timeStamp - meta.time;
+                    const distance = Math.hypot(ev.clientX - meta.x, ev.clientY - meta.y);
+
+                    // If it was a drag, do nothing (dragging is handled by pointermove)
+                    if (distance > 5) {
                       return;
                     }
-                    if (meta) {
-                      const duration = ev.timeStamp - meta.time;
-                      const distance = Math.hypot(ev.clientX - meta.x, ev.clientY - meta.y);
+
+                    if (itemType === 'clip' && clip) {
+                      // Ignore double-clicks; those are handled separately
+                      if (ev.detail && ev.detail > 1) {
+                        return;
+                      }
                       // Treat as a "click to select" only if it was quick and not dragged
                       if (duration <= 250 && distance <= 4) {
                         ev.preventDefault();
